@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vcovhtml"
+version = "0.1.0"
+description = "Read a Verilator coverage .dat and render an EDA-style HTML report (per hierarchy + per instance, code + functional coverage)."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "LGPL-3.0-only" }
+
+[project.scripts]
+vcovhtml = "vcovhtml.cli:main"
+
+[tool.setuptools]
+packages = ["vcovhtml"]
