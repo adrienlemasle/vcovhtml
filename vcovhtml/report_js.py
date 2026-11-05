@@ -240,9 +240,9 @@ JS = r"""
       var name = '<td class="name" style="' + style + '">' + twisty + link + badge + "</td>";
       var c = "";
       DATA.codeTypes.forEach(function (tp) {
-        c += "<td class='pcell' data-type='" + tp + "'>" + cell(scoreOf(r.tally, tp)) + "</td>";
+        c += "<td class='pcell linky' data-type='" + tp + "'>" + cell(scoreOf(r.tally, tp)) + "</td>";
       });
-      c += '<td class="pcell" data-type="func">' + cell(funcScore(r.functional)) + "</td>";
+      c += '<td class="pcell linky" data-type="func">' + cell(funcScore(r.functional)) + "</td>";
       tr.innerHTML = name + c;
       treeBody.appendChild(tr);
       var dr = document.createElement("tr");
@@ -256,6 +256,13 @@ JS = r"""
       var nm = e.target.closest(".name-link");
       var tw = e.target.closest("[data-tw]");
       if (nm) { e.preventDefault(); gotoDetail("inst", +nm.getAttribute("href").split("/")[2]); return; }
+      var pc = e.target.closest("td.pcell.linky");
+      if (pc) {
+        e.preventDefault();
+        var t = pc.getAttribute("data-type");
+        gotoDetail("inst", +e.target.closest("tr").dataset.idx, t === "func" ? "covergroup" : t);
+        return;
+      }
       if (!tw) return;
       var i = +tw.dataset.tw;
       if (collapsed.has(i)) { collapsed.delete(i); tw.textContent = "\u25bc"; }
@@ -288,8 +295,8 @@ JS = r"""
         ? ' <span class="collbadge" title="Variants: ' + esc(r.variants.join(", ")) + '">' + r.variants.length + " variants</span>"
         : "";
       tr.innerHTML = '<td class="name"><a class="name-link" href="#detail/du/' + i + '">' + esc(r.name) + "</a>" + variants + "</td>" +
-        DATA.codeTypes.map(function (tp) { return "<td class='pcell' data-type='" + tp + "'>" + cell(scoreOf(r.tally, tp)) + "</td>"; }).join("") +
-        '<td class="pcell" data-type="func">' + cell(funcScore(r.functional)) + "</td>";
+        DATA.codeTypes.map(function (tp) { return "<td class='pcell linky' data-type='" + tp + "'>" + cell(scoreOf(r.tally, tp)) + "</td>"; }).join("") +
+        '<td class="pcell linky" data-type="func">' + cell(funcScore(r.functional)) + "</td>";
       body.appendChild(tr);
       var dr = document.createElement("tr");
       dr.className = "detail";
@@ -300,7 +307,13 @@ JS = r"""
     });
     tbl.addEventListener("click", function (e) {
       var nm = e.target.closest(".name-link");
-      if (nm) { e.preventDefault(); gotoDetail("du", +nm.getAttribute("href").split("/")[2]); }
+      if (nm) { e.preventDefault(); gotoDetail("du", +nm.getAttribute("href").split("/")[2]); return; }
+      var pc = e.target.closest("td.pcell.linky");
+      if (pc) {
+        e.preventDefault();
+        var t = pc.getAttribute("data-type");
+        gotoDetail("du", +e.target.closest("tr").dataset.idx, t === "func" ? "covergroup" : t);
+      }
     });
     sec.appendChild(tbl);
     return sec;

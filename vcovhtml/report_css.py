@@ -113,7 +113,9 @@ code.expr, code.net {
 .expr-detail td.expr-sub, .tog-detail td.tog-sub, .cg-detail td.cg-sub { padding: 6px 10px 14px 30px; background: #fafbfc; }
 .tog-bdet td.tog-bsub, .cg-bdet td.cg-bsub { padding: 4px 10px 10px 34px; background: #f4f6f8; }
 table.pts .num, table.pts th.num { text-align: right; }
-table.pts .pcell { white-space: nowrap; }
+.pcell { white-space: nowrap; }
+td.pcell.linky { cursor: pointer; }
+td.pcell.linky:hover { background: #eef2f8; }
 table.pts.sub td { padding: 3px 8px; font-size: 13px; }
 th.sortable { cursor: pointer; }
 th.sortable:hover { color: var(--accent); }
