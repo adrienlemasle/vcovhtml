@@ -104,17 +104,14 @@ table.tree td.name { font-weight: 500; white-space: nowrap; }
 .ptag { font-size: 11px; padding: 1px 7px; border-radius: 8px; border: 1px solid var(--line); color: var(--muted); text-transform: capitalize; }
 .empty { color: #9aa0a6; padding: 14px 2px; font-size: 14px; }
 
-section.cg .grp-name { font-weight: 600; }
-section.cg .item-name { color: var(--muted); padding-left: 18px; }
-section.cg .bin-row td { font-size: 12px; }
 footer { margin-top: 30px; color: var(--muted); font-size: 12px; }
 .hint { color: #6b7280; font-size: 13px; margin: 8px 0 12px; }
 code.expr, code.net {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 13px; background: #eef1f5; padding: 2px 6px; border-radius: 4px; color: #1f2937;
 }
-.expr-detail td.expr-sub, .tog-detail td.tog-sub { padding: 6px 10px 14px 30px; background: #fafbfc; }
-.tog-bdet td.tog-bsub { padding: 4px 10px 10px 34px; background: #f4f6f8; }
+.expr-detail td.expr-sub, .tog-detail td.tog-sub, .cg-detail td.cg-sub { padding: 6px 10px 14px 30px; background: #fafbfc; }
+.tog-bdet td.tog-bsub, .cg-bdet td.cg-bsub { padding: 4px 10px 10px 34px; background: #f4f6f8; }
 table.pts .num, table.pts th.num { text-align: right; }
 table.pts .pcell { white-space: nowrap; }
 table.pts.sub td { padding: 3px 8px; font-size: 13px; }

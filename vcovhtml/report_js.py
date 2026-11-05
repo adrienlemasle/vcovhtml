@@ -408,78 +408,199 @@ JS = r"""
     });
   }
 
+  // ---- shared detail-table state ----
   var sortState = {};
-  function coverStatus(score) {
-    if (score == null) return { c: "n", t: "\u2014", rank: 3 };
-    if (score >= 100) return { c: "g", t: "full", rank: 0 };
-    if (score > 0) return { c: "o", t: "partial", rank: 1 };
-    return { c: "r", t: "missed", rank: 2 };
+
+  // ---- functional coverage: covergroup -> coverpoint -> bin ----
+  function groupCg(covergroups) {
+    var out = [];
+    var cIdx = 0;
+    covergroups.forEach(function (g) {
+      var cps = g.items.map(function (it) {
+        return {
+          id: cIdx++,
+          label: it.name,
+          weight: it.weight,
+          totalBins: it.bins.length,
+          hitBins: it.bins.filter(function (b) { return b.covered; }).length,
+          score: it.score,
+          bins: it.bins.map(function (b) {
+            return { label: b.name, count: b.count, atLeast: b.atLeast || 1, covered: b.covered };
+          })
+        };
+      });
+      out.push({
+        id: out.length,
+        group: g.group,
+        totalCps: cps.length,
+        hitCps: cps.filter(function (c) { return c.score >= 100; }).length,
+        score: g.score,
+        cps: cps
+      });
+    });
+    return out;
   }
-  var cgSort = { dir: null };
-  function cgGroupBlock(g, idx) {
-    var s = coverStatus(g.score);
-    var h3 = "<h3 class='cg-grp'>" + esc(g.group) + " \u00b7 " +
-      (g.score == null ? "\u2014" : g.score.toFixed(1) + "%") + " \u00b7 " + g.hit + " / " + g.total +
-      " <span class='st " + s.c + "'>" + s.t + "</span></h3>";
-    var arrow = cgSort.dir === "desc" ? " \u25bc" : cgSort.dir === "asc" ? " \u25b2" : "";
-    var tbl = "<table class='tree'><thead><tr><th>Coverpoint</th><th>Weight</th><th>Score</th><th>Hit / Total</th>" +
-      "<th class='sortable' data-cgsort='cover'>Cover" + arrow + "</th></tr></thead>" +
-      "<tbody class='cg-pts' data-gi='" + idx + "'></tbody></table>";
-    return h3 + tbl;
+  var cgSort = { key: "score", dir: "desc" };
+  var cpSort = { key: "score", dir: "desc" };
+  function cgArrow(key) {
+    return cgSort.key === key ? (cgSort.dir === "asc" ? " \u25b2" : " \u25bc") : "";
   }
-  function drawCgTables() {
-    var cgdata = window.__cgData || [];
-    document.querySelectorAll("#app .cg-pts").forEach(function (tb) {
-      var g = cgdata[+tb.getAttribute("data-gi")];
+  function cpArrow(key) {
+    return cpSort.key === key ? (cpSort.dir === "asc" ? " \u25b2" : " \u25bc") : "";
+  }
+  function binTableHtml(c) {
+    return "<table class='pts sub'><thead><tr>" +
+      "<th>Bin</th><th class='num'>Hits</th><th class='num'>Goal</th><th>Status</th></tr></thead><tbody>" +
+      c.bins.map(function (b) {
+        return "<tr><td>" + esc(shortName(b.label)) + "</td><td class='num'>" + b.count +
+          "</td><td class='num'>" + (b.atLeast > 1 ? b.atLeast : "") + "</td>" +
+          "<td class='st " + (b.covered ? "g" : "r") + "'>" + (b.covered ? "covered" : "missed") + "</td></tr>";
+      }).join("") + "</tbody></table>";
+  }
+  function cgRowHtml(c) {
+    return "<tr>" +
+      "<td class='name'><span class='twisty' data-cp='" + c.id + "'>\u25ba</span> <code class='net'>" + esc(shortName(c.label)) + "</code></td>" +
+      "<td class='num'>" + c.weight + "</td>" +
+      "<td class='num'>" + c.totalBins + "</td>" +
+      "<td class='num'>" + c.hitBins + "</td>" +
+      "<td class='pcell'>" + cell(c.score) + "</td></tr>" +
+      "<tr class='cg-bdet' style='display:none' data-cbd='" + c.id + "'>" +
+      "<td colspan='5' class='cg-bsub'>" + binTableHtml(c) + "</td></tr>";
+  }
+  function drawCgCps(sec) {
+    var openCps = {};
+    sec.querySelectorAll("[data-cbd]").forEach(function (r) {
+      if (r.style.display !== "none") openCps[r.getAttribute("data-cbd")] = true;
+    });
+    sec.querySelectorAll("[data-cgpsort]").forEach(function (th) {
+      th.innerHTML = "Score" + cpArrow("score");
+    });
+    sec.querySelectorAll("tbody.cg-cps").forEach(function (tb) {
+      var g = null;
+      (sec.__groups || []).forEach(function (x) { if (x.id === +tb.getAttribute("data-cgcp")) g = x; });
       if (!g) return;
       tb.innerHTML = "";
-      var items = g.items.slice();
-      if (cgSort.dir) {
-        items.sort(function (a, b) {
-          var ra = coverStatus(a.score).rank, rb = coverStatus(b.score).rank;
-          if (ra !== rb) return (cgSort.dir === "desc") ? (ra - rb) : (rb - ra);
-          var sa = a.score == null ? 0 : a.score, sb = b.score == null ? 0 : b.score;
-          return (cgSort.dir === "desc") ? (sb - sa) : (sa - sb);
-        });
-      }
-      items.forEach(function (it) {
-        var s = coverStatus(it.score);
-        var key = tb.getAttribute("data-gi") + ":" + it.name;
-        var tr = document.createElement("tr");
-        tr.innerHTML = "<td class='item-name'><span class='twisty' data-cg-tw='" + esc(key) + "'>\u25ba</span>" + esc(shortName(it.name)) + "</td>" +
-          "<td>" + it.weight + "</td>" +
-          "<td class='pnum " + s.c + "'>" + (it.score == null ? "\u2014" : it.score.toFixed(1) + "%") + "</td>" +
-          "<td>" + it.hit + " / " + it.total + "</td>" +
-          "<td class='st " + s.c + "'>" + s.t + "</td>";
-        tb.appendChild(tr);
-        it.bins.forEach(function (b) {
-          var bc = b.covered ? "g" : "r";
-          var br = document.createElement("tr");
-          br.className = "cg-fold";
-          br.style.display = "none";
-          br.dataset.parent = key;
-          br.innerHTML = "<td>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;" + esc(shortName(b.name)) + "</td><td></td><td></td>" +
-            "<td class='count'>" + b.count + (b.atLeast > 1 ? " / " + b.atLeast : "") + "</td>" +
-            "<td class='st " + bc + "'>" + (b.covered ? "covered" : "missed") + "</td>";
-          tb.appendChild(br);
-        });
+      var items = g.cps.slice().sort(function (a, b) {
+        var d = (cpSort.dir === "asc") ? 1 : -1;
+        if (cpSort.key === "score") {
+          var sa = a.score == null ? -1 : a.score, sb = b.score == null ? -1 : b.score;
+          if (sa !== sb) return (sb - sa) * d;
+          return a.label.localeCompare(b.label);
+        }
+        return a.label.localeCompare(b.label) * d;
+      });
+      items.forEach(function (c) {
+        var el = document.createElement("table");
+        el.innerHTML = "<tbody>" + cgRowHtml(c) + "</tbody>";
+        var src = el.firstChild;
+        while (src.firstChild) tb.appendChild(src.firstChild);
+        var bdet = tb.querySelector("[data-cbd='" + c.id + "']");
+        if (openCps[c.id]) {
+          bdet.style.display = "";
+          tb.querySelector("[data-cp='" + c.id + "']").textContent = "\u25bc";
+        }
       });
     });
   }
-  function updateCgArrows(fsec) {
-    var arrow = cgSort.dir === "desc" ? " \u25bc" : cgSort.dir === "asc" ? " \u25b2" : "";
-    fsec.querySelectorAll("[data-cgsort]").forEach(function (th) { th.innerHTML = "Cover" + arrow; });
-  }
-  function toggleCgFold(fsec, tw) {
-    var key = tw.getAttribute("data-cg-tw");
-    var anyVisible = false;
-    fsec.querySelectorAll("tr.cg-fold").forEach(function (r) {
-      if (r.dataset.parent === key) {
-        r.style.display = (r.style.display === "none") ? "" : "none";
-        if (r.style.display !== "none") anyVisible = true;
+  function drawCgBody(sec, groups) {
+    var openGroups = [];
+    sec.querySelectorAll("tr[data-cgd]").forEach(function (r) {
+      if (r.style.display !== "none") openGroups.push(+r.getAttribute("data-cgd"));
+    });
+    sec.querySelectorAll("[data-cgsort]").forEach(function (th) {
+      var k = th.getAttribute("data-cgsort");
+      th.innerHTML = (k === "score" ? "Score" : "Covergroup") + cgArrow(k);
+    });
+    var body = sec.querySelector("table.pts tbody");
+    body.innerHTML = "";
+    var sorted = groups.slice().sort(function (a, b) {
+      var d = (cgSort.dir === "asc") ? 1 : -1;
+      if (cgSort.key === "score") {
+        var sa = a.score == null ? -1 : a.score, sb = b.score == null ? -1 : b.score;
+        if (sa !== sb) return (sb - sa) * d;
+        return a.group.localeCompare(b.group);
+      }
+      return a.group.localeCompare(b.group) * d;
+    });
+    sorted.forEach(function (g) {
+      var row = document.createElement("tr");
+      row.innerHTML = "<td class='name'><span class='twisty' data-cg='" + g.id + "'>\u25ba</span> <code class='net'>" +
+        esc(shortName(g.group)) + "</code></td>" +
+        "<td class='num'>" + g.totalCps + "</td>" +
+        "<td class='num'>" + g.hitCps + "</td>" +
+        "<td class='pcell'>" + cell(g.score) + "</td>";
+      body.appendChild(row);
+      var det = document.createElement("tr");
+      det.className = "cg-detail";
+      det.style.display = "none";
+      det.setAttribute("data-cgd", g.id);
+      det.innerHTML = "<td colspan='4' class='cg-sub'><table class='pts'>" +
+        "<thead><tr><th>Coverpoint</th><th class='num'>Weight</th><th class='num'>Bins</th><th class='num'>Covered</th>" +
+        "<th class='sortable' data-cgpsort='score'>Score" + cpArrow("score") + "</th></tr></thead>" +
+        "<tbody class='cg-cps' data-cgcp='" + g.id + "'></tbody></table></td>";
+      body.appendChild(det);
+      if (openGroups.indexOf(g.id) >= 0) {
+        det.style.display = "";
+        row.querySelector("[data-cg]").textContent = "\u25bc";
       }
     });
-    tw.textContent = anyVisible ? "\u25bc" : "\u25ba";
+    drawCgCps(sec);
+  }
+  function drawCgGroups(sec, covergroups, overall) {
+    var groups = groupCg(covergroups);
+    sec.__groups = groups;
+    if (!groups.length) {
+      sec.innerHTML += "<div class='empty'>No covergroup data for this module.</div>";
+      return;
+    }
+    var cpsTotal = groups.reduce(function (n, g) { return n + g.totalCps; }, 0);
+    var binsTotal = groups.reduce(function (n, g) { return n + g.cps.reduce(function (m, c) { return m + c.totalBins; }, 0); }, 0);
+    var tail = (overall != null) ? " \u00b7 overall " + overall.toFixed(1) + "%" : "";
+    sec.innerHTML += "<p class='hint'>" + groups.length + " covergroup(s), " + cpsTotal + " coverpoint(s), " + binsTotal +
+      " bin(s)" + tail + ". Click the Covergroup or Score header to sort; click a covergroup to see its coverpoints (their Score header sorts them too); click a coverpoint to see its bins.</p>";
+    var tbl = document.createElement("table");
+    tbl.className = "pts";
+    tbl.innerHTML = "<thead><tr>" +
+      "<th class='sortable' data-cgsort='group'>Covergroup</th>" +
+      "<th class='num'>Coverpoints</th>" +
+      "<th class='num'>Covered</th>" +
+      "<th class='sortable' data-cgsort='score'>Score</th>" +
+      "</tr></thead><tbody></tbody>";
+    sec.appendChild(tbl);
+    drawCgBody(sec, groups);
+    sec.addEventListener("click", function (e) {
+      var cth = e.target.closest("[data-cgpsort]");
+      if (cth) {
+        cpSort.dir = (cpSort.dir === "desc") ? "asc" : "desc";
+        drawCgCps(sec);
+        return;
+      }
+      var th = e.target.closest("[data-cgsort]");
+      var tw = e.target.closest("[data-cg]");
+      var cp = e.target.closest("[data-cp]");
+      if (th) {
+        var key = th.getAttribute("data-cgsort");
+        if (cgSort.key === key) cgSort.dir = (cgSort.dir === "asc") ? "desc" : "asc";
+        else { cgSort.key = key; cgSort.dir = (key === "score") ? "desc" : "asc"; }
+        drawCgBody(sec, groups);
+        return;
+      }
+      if (tw) {
+        var gi = tw.getAttribute("data-cg");
+        var det = sec.querySelector("[data-cgd='" + gi + "']");
+        var open = det.style.display !== "none";
+        det.style.display = open ? "none" : "";
+        tw.textContent = open ? "\u25ba" : "\u25bc";
+        return;
+      }
+      if (cp) {
+        var ci = cp.getAttribute("data-cp");
+        var bdet = sec.querySelector("[data-cbd='" + ci + "']");
+        var open2 = bdet.style.display !== "none";
+        bdet.style.display = open2 ? "none" : "";
+        cp.textContent = open2 ? "\u25ba" : "\u25bc";
+      }
+    });
   }
   function iterOf(pt) {
     if (!pt.h) return "";
@@ -846,27 +967,14 @@ JS = r"""
     if (type === "covergroup") {
       var fsec = document.createElement("section");
       fsec.className = "cg";
-      var fscore = r.functional;
-      fsec.innerHTML = "<h2>Functional coverage (covergroups)" + (fscore && fscore.score != null ? " \u00b7 " + fscore.score.toFixed(1) + "%" : "") + "</h2>";
+      fsec.innerHTML = "<h2>Functional coverage</h2>";
+      var fscore = (r.functional && r.functional.score != null) ? r.functional.score : null;
       if (r.covergroups && r.covergroups.length) {
-        var idx = 0;
-        r.covergroups.forEach(function (g) { fsec.innerHTML += cgGroupBlock(g, idx++); });
-        window.__cgData = r.covergroups;
+        drawCgGroups(fsec, r.covergroups, fscore);
       } else {
         fsec.innerHTML += "<div class='empty'>No covergroup data for this module.</div>";
       }
       app.appendChild(fsec);
-      drawCgTables();
-      fsec.addEventListener("click", function (e) {
-        var tw = e.target.closest("[data-cg-tw]");
-        var th = e.target.closest("[data-cgsort]");
-        if (tw) { toggleCgFold(fsec, tw); return; }
-        if (th) {
-          cgSort.dir = cgSort.dir === null ? "desc" : cgSort.dir === "desc" ? "asc" : null;
-          updateCgArrows(fsec);
-          drawCgTables();
-        }
-      });
       return;
     }
     var rows = (r.points || []).filter(function (p) { return p.type === type; });
