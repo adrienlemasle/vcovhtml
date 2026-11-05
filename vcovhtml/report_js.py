@@ -614,12 +614,17 @@ JS = r"""
       }
     });
   }
-  // ---- toggle coverage: group direction records into their parent net ----
+  // ---- toggle coverage: signal -> bit -> direction ----
   function togParts(o) {
     var i = o.lastIndexOf(":");
     return i >= 0 ? { net: o.slice(0, i), dir: o.slice(i + 1) } : { net: o, dir: "" };
   }
-  function groupTog(points) {
+  function sigBase(net) {
+    var b = net;
+    while (/\[\d+\]$/.test(b)) b = b.replace(/\[\d+\]$/, "");
+    return b;
+  }
+  function groupBits(points) {
     var map = {};
     points.forEach(function (p) {
       var c = togParts(p.comment || "");
@@ -632,7 +637,9 @@ JS = r"""
       var list = map[k];
       out.push({
         id: idx++,
+        file: list[0].rec.file || "",
         line: list[0].rec.line || 0,
+        h: list[0].rec.h || "",
         label: list[0].net,
         total: list.length,
         hit: list.filter(function (x) { return x.rec.count > 0; }).length,
@@ -641,9 +648,45 @@ JS = r"""
     });
     return out;
   }
+  function groupTog(points) {
+    var bits = groupBits(points);
+    var map = {};
+    var out = [];
+    bits.forEach(function (b) {
+      var base = sigBase(b.label);
+      var key = (b.file || "") + "#" + b.line + "#" + (b.h || "") + "#" + base;
+      var s = map[key];
+      if (!s) {
+        s = { id: out.length, file: b.file, line: b.line, h: b.h, base: base,
+              totalBits: 0, hitBits: 0, totalDirs: 0, hitDirs: 0, bits: [] };
+        map[key] = s;
+        out.push(s);
+      }
+      s.totalBits++;
+      if (b.hit === b.total) s.hitBits++;
+      s.totalDirs += b.total;
+      s.hitDirs += b.hit;
+      s.bits.push(b);
+    });
+    return out;
+  }
   var togSort = { key: "line", dir: "asc" };
   function togArrow(key) {
     return togSort.key === key ? (togSort.dir === "asc" ? " \u25b2" : " \u25bc") : "";
+  }
+  function bitScore(b) {
+    return b.total ? 100 * b.hit / b.total : null;
+  }
+
+  // direction sub-table for one bit (its 0->1 / 1->0 records)
+  function dirTableHtml(b) {
+    return "<table class='pts sub'><thead><tr>" +
+      "<th>Direction</th><th class='num'>Hits</th><th>Status</th></tr></thead><tbody>" +
+      b.dirs.map(function (x) {
+        var hit = x.rec.count > 0;
+        return "<tr><td>" + esc(x.dir) + "</td><td class='num'>" + x.rec.count +
+          "</td><td class='st " + (hit ? "g" : "r") + "'>" + (hit ? "covered" : "missed") + "</td></tr>";
+      }).join("") + "</tbody></table>";
   }
 
   function drawTogBody(sec, groups) {
@@ -656,34 +699,45 @@ JS = r"""
     var sorted = groups.slice().sort(function (a, b) {
       var d = (togSort.dir === "asc") ? 1 : -1;
       if (togSort.key === "score") {
-        var sa = a.total ? 100 * a.hit / a.total : 0, sb = b.total ? 100 * b.hit / b.total : 0;
+        var sa = a.totalBits ? 100 * a.hitBits / a.totalBits : 0, sb = b.totalBits ? 100 * b.hitBits / b.totalBits : 0;
         if (sa !== sb) return (sb - sa) * d;
         return (a.line - b.line) * d;
       }
       if (a.line !== b.line) return (a.line - b.line) * d;
-      return a.label.localeCompare(b.label);
+      return a.base.localeCompare(b.base);
     });
-    sorted.forEach(function (g) {
-      var sc = g.total ? 100 * g.hit / g.total : null;
+    sorted.forEach(function (s) {
+      var sc = s.totalBits ? 100 * s.hitBits / s.totalBits : null;
       var row = document.createElement("tr");
-      row.innerHTML = "<td class='num'>" + g.line + "</td>" +
-        "<td class='name' style='padding-left:8px'><span class='twisty' data-tg='" + g.id + "'>\u25ba</span> <code class='net'>" +
-        esc(g.label) + "</code></td>" +
-        "<td class='num'>" + g.total + "</td>" +
-        "<td class='num'>" + g.hit + "</td>" +
+      row.innerHTML = "<td class='num'>" + s.line + "</td>" +
+        "<td class='name' style='padding-left:8px'><span class='twisty' data-tg='" + s.id + "'>\u25ba</span> <code class='net'>" +
+        esc(s.base) + "</code></td>" +
+        "<td class='num'>" + s.totalBits + "</td>" +
+        "<td class='num'>" + s.hitBits + "</td>" +
         "<td class='pcell'>" + cell(sc) + "</td>";
       body.appendChild(row);
       var det = document.createElement("tr");
       det.className = "tog-detail";
       det.style.display = "none";
-      det.setAttribute("data-tgd", g.id);
-      det.innerHTML = "<td colspan='5' class='tog-sub'><table class='pts sub'><thead><tr>" +
-        "<th>Direction</th><th class='num'>Hits</th><th>Status</th></tr></thead><tbody>" +
-        g.dirs.map(function (x) {
-          var hit = x.rec.count > 0;
-          return "<tr><td>" + esc(x.dir) + "</td><td class='num'>" + x.rec.count +
-            "</td><td class='st " + (hit ? "g" : "r") + "'>" + (hit ? "covered" : "missed") + "</td></tr>";
-        }).join("") + "</tbody></table></td>";
+      det.setAttribute("data-tgd", s.id);
+      if (s.totalBits === 1 && s.bits[0].label === s.base) {
+        // single-bit signal: expand straight to its direction records
+        det.innerHTML = "<td colspan='5' class='tog-sub'>" + dirTableHtml(s.bits[0]) + "</td>";
+      } else {
+        var bitsHtml = s.bits.map(function (b) {
+          var bsc = bitScore(b);
+          return "<tr>" +
+            "<td class='name'><span class='twisty' data-tbit='" + b.id + "'>\u25ba</span> <code class='net'>" + esc(b.label) + "</code></td>" +
+            "<td class='num'>" + b.total + "</td>" +
+            "<td class='num'>" + b.hit + "</td>" +
+            "<td class='pcell'>" + cell(bsc) + "</td></tr>" +
+            "<tr class='tog-bdet' style='display:none' data-tbd='" + b.id + "'>" +
+            "<td colspan='4' class='tog-bsub'>" + dirTableHtml(b) + "</td></tr>";
+        }).join("");
+        det.innerHTML = "<td colspan='5' class='tog-sub'><table class='pts'>" +
+          "<thead><tr><th>Bit</th><th class='num'>Directions</th><th class='num'>Covered</th><th class='num'>Score</th></tr></thead>" +
+          "<tbody>" + bitsHtml + "</tbody></table></td>";
+      }
       body.appendChild(det);
     });
   }
@@ -693,15 +747,16 @@ JS = r"""
       sec.innerHTML += "<div class='empty'>No toggle points.</div>";
       return;
     }
-    sec.innerHTML += "<p class='hint'>" + groups.length + " net(s) over " + points.length +
-      " direction records. Click the Line or Score header to sort; click a net to see which directions are hit or missed.</p>";
+    var bitsTotal = groups.reduce(function (n, g) { return n + g.totalBits; }, 0);
+    sec.innerHTML += "<p class='hint'>" + groups.length + " signal(s), " + bitsTotal + " bit(s), " + points.length +
+      " direction records. Click the Line or Score header to sort; click a signal to see its bits; click a bit to see its 0->1 / 1->0 records.</p>";
     var tbl = document.createElement("table");
     tbl.className = "pts";
     tbl.innerHTML = "<thead><tr>" +
       "<th class='sortable' data-togsort='line'>Line</th>" +
-      "<th>Net</th>" +
-      "<th class='num'>Directions</th>" +
-      "<th class='num'>Covered</th>" +
+      "<th>Signal</th>" +
+      "<th class='num'>Bits</th>" +
+      "<th class='num'>Bits covered</th>" +
       "<th class='sortable' data-togsort='score'>Score</th>" +
       "</tr></thead><tbody></tbody>";
     sec.appendChild(tbl);
@@ -709,6 +764,7 @@ JS = r"""
     sec.addEventListener("click", function (e) {
       var th = e.target.closest("[data-togsort]");
       var tw = e.target.closest("[data-tg]");
+      var tb = e.target.closest("[data-tbit]");
       if (th) {
         var key = th.getAttribute("data-togsort");
         if (togSort.key === key) togSort.dir = (togSort.dir === "asc") ? "desc" : "asc";
@@ -722,6 +778,14 @@ JS = r"""
         var open = det.style.display !== "none";
         det.style.display = open ? "none" : "";
         tw.textContent = open ? "\u25ba" : "\u25bc";
+        return;
+      }
+      if (tb) {
+        var bi = tb.getAttribute("data-tbit");
+        var bd = sec.querySelector("[data-tbd='" + bi + "']");
+        var bopen = bd.style.display !== "none";
+        bd.style.display = bopen ? "none" : "";
+        tb.textContent = bopen ? "\u25ba" : "\u25bc";
       }
     });
   }
