@@ -135,7 +135,7 @@ pre.filesrc {
 margin: 0; padding: 10px 12px;
 border: 1px solid var(--line); border-radius: 6px; background: #f6f8fa;
 font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-font-size: 12.5px; line-height: 1;
+font-size: 12.5px; line-height: 1.1;
 white-space: pre; overflow: auto; max-height: calc(100vh - 150px);
 }
 pre.filesrc .ln { display: inline-block; width: 3.4em; margin-right: 12px; text-align: right; color: var(--muted); user-select: none; }
