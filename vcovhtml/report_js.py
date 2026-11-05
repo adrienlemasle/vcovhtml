@@ -614,6 +614,117 @@ JS = r"""
       }
     });
   }
+  // ---- toggle coverage: group direction records into their parent net ----
+  function togParts(o) {
+    var i = o.lastIndexOf(":");
+    return i >= 0 ? { net: o.slice(0, i), dir: o.slice(i + 1) } : { net: o, dir: "" };
+  }
+  function groupTog(points) {
+    var map = {};
+    points.forEach(function (p) {
+      var c = togParts(p.comment || "");
+      var key = (p.file || "") + "#" + p.line + "#" + (p.h || "") + "#" + c.net;
+      (map[key] = map[key] || []).push({ rec: p, net: c.net, dir: c.dir });
+    });
+    var out = [];
+    var idx = 0;
+    Object.keys(map).forEach(function (k) {
+      var list = map[k];
+      out.push({
+        id: idx++,
+        line: list[0].rec.line || 0,
+        label: list[0].net,
+        total: list.length,
+        hit: list.filter(function (x) { return x.rec.count > 0; }).length,
+        dirs: list
+      });
+    });
+    return out;
+  }
+  var togSort = { key: "line", dir: "asc" };
+  function togArrow(key) {
+    return togSort.key === key ? (togSort.dir === "asc" ? " \u25b2" : " \u25bc") : "";
+  }
+
+  function drawTogBody(sec, groups) {
+    sec.querySelectorAll("[data-togsort]").forEach(function (th) {
+      var k = th.getAttribute("data-togsort");
+      th.innerHTML = (k === "line" ? "Line" : "Score") + togArrow(k);
+    });
+    var body = sec.querySelector("table.pts tbody");
+    body.innerHTML = "";
+    var sorted = groups.slice().sort(function (a, b) {
+      var d = (togSort.dir === "asc") ? 1 : -1;
+      if (togSort.key === "score") {
+        var sa = a.total ? 100 * a.hit / a.total : 0, sb = b.total ? 100 * b.hit / b.total : 0;
+        if (sa !== sb) return (sb - sa) * d;
+        return (a.line - b.line) * d;
+      }
+      if (a.line !== b.line) return (a.line - b.line) * d;
+      return a.label.localeCompare(b.label);
+    });
+    sorted.forEach(function (g) {
+      var sc = g.total ? 100 * g.hit / g.total : null;
+      var row = document.createElement("tr");
+      row.innerHTML = "<td class='num'>" + g.line + "</td>" +
+        "<td class='name' style='padding-left:8px'><span class='twisty' data-tg='" + g.id + "'>\u25ba</span> <code class='net'>" +
+        esc(g.label) + "</code></td>" +
+        "<td class='num'>" + g.total + "</td>" +
+        "<td class='num'>" + g.hit + "</td>" +
+        "<td class='pcell'>" + cell(sc) + "</td>";
+      body.appendChild(row);
+      var det = document.createElement("tr");
+      det.className = "tog-detail";
+      det.style.display = "none";
+      det.setAttribute("data-tgd", g.id);
+      det.innerHTML = "<td colspan='5' class='tog-sub'><table class='pts sub'><thead><tr>" +
+        "<th>Direction</th><th class='num'>Hits</th><th>Status</th></tr></thead><tbody>" +
+        g.dirs.map(function (x) {
+          var hit = x.rec.count > 0;
+          return "<tr><td>" + esc(x.dir) + "</td><td class='num'>" + x.rec.count +
+            "</td><td class='st " + (hit ? "g" : "r") + "'>" + (hit ? "covered" : "missed") + "</td></tr>";
+        }).join("") + "</tbody></table></td>";
+      body.appendChild(det);
+    });
+  }
+  function drawTogGroups(sec, points) {
+    var groups = groupTog(points);
+    if (!groups.length) {
+      sec.innerHTML += "<div class='empty'>No toggle points.</div>";
+      return;
+    }
+    sec.innerHTML += "<p class='hint'>" + groups.length + " net(s) over " + points.length +
+      " direction records. Click the Line or Score header to sort; click a net to see which directions are hit or missed.</p>";
+    var tbl = document.createElement("table");
+    tbl.className = "pts";
+    tbl.innerHTML = "<thead><tr>" +
+      "<th class='sortable' data-togsort='line'>Line</th>" +
+      "<th>Net</th>" +
+      "<th class='num'>Directions</th>" +
+      "<th class='num'>Covered</th>" +
+      "<th class='sortable' data-togsort='score'>Score</th>" +
+      "</tr></thead><tbody></tbody>";
+    sec.appendChild(tbl);
+    drawTogBody(sec, groups);
+    sec.addEventListener("click", function (e) {
+      var th = e.target.closest("[data-togsort]");
+      var tw = e.target.closest("[data-tg]");
+      if (th) {
+        var key = th.getAttribute("data-togsort");
+        if (togSort.key === key) togSort.dir = (togSort.dir === "asc") ? "desc" : "asc";
+        else { togSort.key = key; togSort.dir = (key === "score") ? "desc" : "asc"; }
+        drawTogBody(sec, groups);
+        return;
+      }
+      if (tw) {
+        var gi = tw.getAttribute("data-tg");
+        var det = sec.querySelector("[data-tgd='" + gi + "']");
+        var open = det.style.display !== "none";
+        det.style.display = open ? "none" : "";
+        tw.textContent = open ? "\u25ba" : "\u25bc";
+      }
+    });
+  }
 
   function renderTypeDetail(kind, i, type) {
     var r = kind === "inst" ? instRows[i] : duRows[i];
@@ -652,6 +763,13 @@ JS = r"""
       esec.innerHTML = "<h2>Expression coverage</h2>";
       app.appendChild(esec);
       drawExprGroups(esec, rows);
+      return;
+    }
+    if (type === "toggle") {
+      var tsec = document.createElement("section");
+      tsec.innerHTML = "<h2>Toggle coverage</h2>";
+      app.appendChild(tsec);
+      drawTogGroups(tsec, rows);
       return;
     }
     if (!sortState[type]) sortState[type] = { key: "line", dir: "asc" };
