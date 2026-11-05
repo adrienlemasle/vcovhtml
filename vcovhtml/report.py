@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Build the JSON data island and assemble the self-contained HTML report."""
 import json
+import os
 
 from . import __version__
 from .covdat import Point
@@ -94,7 +95,40 @@ def _cg_group_json(g) -> dict:
     }
 
 
-def build_data(points, source: str) -> dict:
+def fetch_source_lines(points, root):
+    """Read the referenced source lines from disk, if the files resolve.
+
+    The .dat stores only each record's path (relative to where Verilator
+    was run) and line number -- no code.  For every distinct path that
+    resolves under ``root`` (absolute paths are used as-is), the smallest
+    contiguous range covering the requested lines is read and returned as
+    a JSON-friendly map  path -> {"start": n, "lines": [...]}.  Paths that
+    cannot be read are skipped: the report still renders, and the UI shows
+    "source unavailable" for those rows.
+    """
+    want = {}  # path -> set of line numbers
+    for p in points:
+        if p.t == "covergroup" or not p.f or not p.l:
+            continue
+        want.setdefault(p.f, set()).add(p.l)
+    out = {}
+    for path, lines in sorted(want.items()):
+        full = path if os.path.isabs(path) else os.path.join(root, path)
+        try:
+            with open(full, encoding="utf-8", errors="replace") as fh:
+                text = fh.readlines()
+        except OSError:
+            continue
+        start = max(min(lines), 1)
+        end = min(max(lines), len(text))
+        if end < start:
+            continue
+        chunk = [ln.rstrip("\n") for ln in text[start - 1:end]]
+        out[path] = {"start": start, "lines": chunk}
+    return out
+
+
+def build_data(points, source: str, root: str = None) -> dict:
     """Reduce parsed Points to a JSON-serializable report payload."""
     # Collapse records reported once per parametrization of a module (a .dat
     # merged from separately-built variants) so every view sees each record
@@ -102,6 +136,11 @@ def build_data(points, source: str) -> dict:
     # so they never appear in any view or detail page.
     points = merge_parametrized_points(points)
     points = [p for p in points if not is_internal_point(p)]
+
+    # -- source lines (optional): the .dat has no code; read the referenced
+    # lines from disk when they resolve under ``root`` so each row can
+    # show its source
+    src = fetch_source_lines(points, root) if root else {}
 
     # -- functional coverage: attach to modules ------------------------
     groups = build_covergroups(points)
@@ -192,6 +231,7 @@ def build_data(points, source: str) -> dict:
         "summaryCode": summary_code,
         "summaryFunctional": _entry(overall["hit"], overall["total"]),
         "rows": rows,
+        "src": src,
         "nPoints": len(points),
     }
 
@@ -213,9 +253,9 @@ def render_html(data: dict) -> str:
     )
 
 
-def write_report(points, source: str, out_path: str) -> str:
+def write_report(points, source: str, out_path: str, root: str = None) -> str:
     """Build the report from points and write it to ``out_path``."""
-    html = render_html(build_data(points, source))
+    html = render_html(build_data(points, source, root))
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(html)
     return out_path

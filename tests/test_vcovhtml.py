@@ -264,5 +264,44 @@ class TestMergeParametrized(unittest.TestCase):
         self.assertEqual(data["summaryCode"]["line"]["hit"], 1)
         self.assertEqual(data["summaryCode"]["line"]["total"], 1)
 
+class TestSourceLines(unittest.TestCase):
+    def test_payload_and_html(self):
+        with tempfile.TemporaryDirectory() as d:
+            sdir = os.path.join(d, "src")
+            os.makedirs(sdir)
+            _write(os.path.join(sdir, "x.sv"),
+                   "module x;\n  int a;\n  a = 1;\nendmodule\n")
+            p = os.path.join(d, "c.dat")
+            _write(p, "# SystemC::Coverage-3\n"
+                     "C '\x01t\x02line\x01f\x02src/x.sv\x01l\x023' 5\n"
+                     "C '\x01t\x02branch\x01f\x02src/x.sv\x01l\x024' 0\n")
+            pts, _ = parse_dat(p)
+            data = build_data(pts, "c.dat", d)
+            s = data["src"]["src/x.sv"]
+            self.assertEqual(s["start"], 3)
+            self.assertEqual(s["lines"], ["  a = 1;", "endmodule"])
+            self.assertIn("a = 1;", render_html(data))
+
+    def test_missing_sources_fall_back(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "c.dat")
+            _write(p, "# SystemC::Coverage-3\n"
+                     "C '\x01t\x02line\x01f\x02src/nope.sv\x01l\x029' 5\n")
+            pts, _ = parse_dat(p)
+            data = build_data(pts, "c.dat", d)
+            self.assertEqual(data["src"], {})
+            self.assertTrue(render_html(data).startswith("<!DOCTYPE html>"))
+
+    def test_absolute_paths(self):
+        with tempfile.TemporaryDirectory() as d:
+            sv = os.path.join(d, "abs.sv")
+            _write(sv, "line one\nline two\n")
+            p = os.path.join(d, "c.dat")
+            _write(p, "# SystemC::Coverage-3\nC '\x01t\x02line\x01f\x02" + sv +
+                   "\x01l\x022' 5\n")
+            pts, _ = parse_dat(p)
+            data = build_data(pts, "c.dat", "/nonexistent")
+            self.assertEqual(data["src"][sv]["lines"], ["line two"])
+
 if __name__ == "__main__":
     unittest.main()

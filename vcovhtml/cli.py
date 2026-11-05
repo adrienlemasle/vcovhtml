@@ -4,6 +4,10 @@
 Accepts a single .dat file, or a directory (every *.dat under it is parsed
 and merged, summing counts of identical points across runs -- the same
 behaviour as `verilator_coverage` when given several inputs).
+
+When a source tree is available (``--source-root``, defaulting to the current
+directory), the report also shows each point's actual source line; rows whose
+files cannot be read degrade gracefully.
 """
 from __future__ import annotations
 
@@ -72,6 +76,10 @@ def main(argv=None) -> int:
                     help="output HTML file (default: coverage.html)")
     ap.add_argument("--types", nargs="*", default=None, metavar="TYPE",
                     help="restrict to these types, e.g. line branch expr")
+    ap.add_argument("--source-root", default=None, metavar="DIR",
+                    help="directory from which the .dat's relative source paths are "
+                         "resolved for the source-line view (default: current directory; "
+                         "rows degrade gracefully when a file is missing)")
     ap.add_argument("--open", action="store_true",
                     help="open the report in a web browser after writing")
     ap.add_argument("--version", action="version", version="vcovhtml " + __version__)
@@ -88,8 +96,9 @@ def main(argv=None) -> int:
         return 1
 
     source = " ".join(args.input)
-    data = build_data(points, source)
-    out = write_report(points, source, args.output)
+    root = args.source_root or os.getcwd()
+    data = build_data(points, source, root)
+    out = write_report(points, source, args.output, root)
     _print_summary(data)
     print("wrote %s" % out)
     if args.open:

@@ -119,4 +119,10 @@ table.pts .num, table.pts th.num { text-align: right; }
 table.pts.sub td { padding: 3px 8px; font-size: 13px; }
 th.sortable { cursor: pointer; }
 th.sortable:hover { color: var(--accent); }
+td.code-line {
+font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+font-size: 12.5px; color: var(--text);
+white-space: pre; overflow-x: auto; max-width: 440px;
+}
+.dim { color: var(--n); font-style: italic; font-size: 12px; }
 """

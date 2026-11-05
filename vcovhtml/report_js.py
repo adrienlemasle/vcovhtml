@@ -454,6 +454,19 @@ JS = r"""
     var m = last.match(/\[(\*|\d+)\]/);
     return m ? m[1] : "";
   }
+  function srcText(p) {
+    var s = DATA.src && p.file ? DATA.src[p.file] : null;
+    if (!s || !p.line) return null;
+    var i = p.line - s.start;
+    if (i < 0 || i >= s.lines.length) return null;
+    return s.lines[i];
+  }
+  function srcCell(p) {
+    var t = srcText(p);
+    if (t === null) return "<span class='dim'>source unavailable</span>";
+    return (t === "") ? "&nbsp;" : esc(t);
+  }
+
   function drawDetail(sec, rows) {
     if (!rows.length) return;
     var st = sortState[rows[0].type] || { key: "line", dir: "asc" };
@@ -476,6 +489,7 @@ JS = r"""
       var it = iterOf(p);
       tr.innerHTML = "<td class='count'>" + p.line + (it ? ' <span class="iter">[' + it + ']</span>' : "") + "</td>" +
         "<td class='comment'>" + esc(p.comment || "") + "</td>" +
+        "<td class='code-line'>" + srcCell(p) + "</td>" +
         "<td class='st " + (p.covered ? "g" : "r") + "'>" + (p.covered ? "covered" : "missed") + "</td>" +
         "<td class='count'>" + p.count + "</td>" +
         "<td class='count'>" + (p.atLeast || 1) + "</td>";
@@ -848,6 +862,7 @@ JS = r"""
     tbl.innerHTML = "<thead><tr>" +
       "<th class='sortable' data-sort='line'>Line" + (st.key === "line" ? (st.dir === "asc" ? " \u25b2" : " \u25bc") : "") + "</th>" +
       "<th>Comment</th>" +
+      "<th>Source</th>" +
       "<th class='sortable' data-sort='status'>Status" + (st.key === "status" ? (st.dir === "asc" ? " \u25b2" : " \u25bc") : "") + "</th>" +
       "<th>Hits</th><th>Goal</th></tr></thead><tbody class='td-body'></tbody>";
     sec.appendChild(tbl);
