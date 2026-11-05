@@ -927,18 +927,17 @@ JS = r"""
     var rows = [];
     for (var i = 0; i < lines.length; i++) {
       var n = i + 1;
-      rows.push("<tr" + (n === target ? " class='target'" : "") + ">" +
-        "<td class='num'><a class='line-link' href='#file/" + idx + "/" + n + "'>" + n + "</a></td>" +
-        "<td class='code-line'>" + (lines[i] === "" ? "&nbsp;" : hl(lines[i])) + "</td></tr>");
+      rows.push("<div class='fline" + (n === target ? " target" : "") + "'>" +
+        "<span class='ln'><a class='line-link' href='#file/" + idx + "/" + n + "'>" + n + "</a></span>" +
+        "<span class='fcode'>" + (lines[i] === "" ? "&nbsp;" : hl(lines[i])) + "</span></div>");
     }
-    var tbl = document.createElement("table");
-    tbl.className = "pts";
-    tbl.innerHTML = "<thead><tr><th class='num'>Line</th><th>Source</th></tr></thead><tbody>" +
-      rows.join("") + "</tbody>";
-    app.appendChild(tbl);
+    var pre = document.createElement("pre");
+    pre.className = "filesrc";
+    pre.innerHTML = rows.join("");
+    app.appendChild(pre);
     if (target) {
-      var tr = tbl.querySelector("tr.target");
-      if (tr) tr.scrollIntoView({ block: "center" });
+      var tl = pre.querySelector(".fline.target");
+      if (tl) tl.scrollIntoView({ block: "center" });
     }
   }
   function route() {

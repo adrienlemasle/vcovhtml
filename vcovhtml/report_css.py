@@ -125,11 +125,19 @@ font-size: 12.5px; color: var(--text);
 white-space: pre; overflow-x: auto; max-width: 440px;
 }
 .dim { color: var(--n); font-style: italic; font-size: 12px; }
-td.code-line .tk-c { color: #6a737d; font-style: italic; }
-td.code-line .tk-s { color: #0550ae; }
-td.code-line .tk-n { color: #8250df; }
-td.code-line .tk-k { color: #cf222e; }
+.tk-c { color: #6a737d; font-style: italic; }
+.tk-s { color: #0550ae; }
+.tk-n { color: #8250df; }
+.tk-k { color: #cf222e; }
 a.line-link { color: var(--accent); text-decoration: none; cursor: pointer; }
 a.line-link:hover { text-decoration: underline; }
-table.pts tr.target td { background: #fff8c5; }
+pre.filesrc {
+margin: 0; padding: 10px 12px;
+border: 1px solid var(--line); border-radius: 6px; background: #f6f8fa;
+font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+font-size: 12.5px; line-height: 0.8;
+white-space: pre; overflow: auto; max-height: calc(100vh - 150px);
+}
+pre.filesrc .ln { display: inline-block; width: 3.4em; margin-right: 12px; text-align: right; color: var(--muted); user-select: none; }
+pre.filesrc .fline.target { background: #fff8c5; }
 """
