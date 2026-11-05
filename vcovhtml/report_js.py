@@ -1042,7 +1042,7 @@ JS = r"""
     var back = document.createElement("button");
     back.className = "backbtn";
     back.innerHTML = "\u2190 Back to report";
-    back.addEventListener("click", function () { location.hash = ""; });
+    back.addEventListener("click", function () { location.hash = lastHash; });
     app.appendChild(back);
     var lines = SRC[f].lines;
     var rows = [];
@@ -1061,6 +1061,7 @@ JS = r"""
       if (tl) tl.scrollIntoView({ block: "center" });
     }
   }
+  var lastHash = "";
   function route() {
     var h = location.hash.replace(/^#/, "");
     var parts = h.split("/").filter(Boolean);
@@ -1080,10 +1081,15 @@ JS = r"""
   }
   function gotoDetail(kind, i, type) {
     var h = "#detail/" + kind + "/" + i + (type ? "/" + type : "");
+    lastHash = location.hash;
     if (location.hash === h) route();
     else location.hash = h;
   }
   window.addEventListener("hashchange", route);
+  document.addEventListener("click", function (e) {
+    var a = e.target.closest ? e.target.closest("a") : null;
+    if (a && (a.getAttribute("href") || "").charAt(0) === "#") lastHash = location.hash;
+  }, true);
   route();
 })();
 """
