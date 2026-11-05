@@ -82,6 +82,9 @@ JS = r"""
     }
     return h;
   }
+  function typeName(t) {
+    return t === "expr" ? "expression" : t;
+  }
   function summaryCards() {
     var cards = document.createElement("div");
     cards.className = "cards";
@@ -95,7 +98,7 @@ JS = r"""
       return c;
     };
     DATA.codeTypes.forEach(function (tp) {
-      cards.appendChild(mk(tp, DATA.summaryCode[tp] || { hit: 0, total: 0, score: null }));
+      cards.appendChild(mk(typeName(tp), DATA.summaryCode[tp] || { hit: 0, total: 0, score: null }));
     });
     cards.appendChild(mk("Covergroups", DATA.summaryFunctional));
     return cards;
@@ -117,7 +120,7 @@ JS = r"""
       '<input type="text" id="search" placeholder="Filter by name...">' +
       '<span class="grp"><label>Types:</label></span>' +
       DATA.codeTypes.map(function (tp) {
-        return '<label class="chk"><input type="checkbox" id="type-' + tp + '" checked> ' + esc(tp) + "</label>";
+        return '<label class="chk"><input type="checkbox" id="type-' + tp + '" checked> ' + esc(typeName(tp)) + "</label>";
       }).join("") +
       '<label class="chk"><input type="checkbox" id="type-func" checked> covergroup</label>' +
       '<span class="grp"><label>Status:</label><select id="status">' +
@@ -186,7 +189,7 @@ JS = r"""
     tbl.className = "tree";
     var head = "<thead><tr><th>Instance</th>";
     DATA.codeTypes.forEach(function (tp) {
-      head += "<th class='pcell' data-type='" + tp + "'>" + esc(tp) + "</th>";
+      head += "<th class='pcell' data-type='" + tp + "'>" + esc(typeName(tp)) + "</th>";
     });
     head += '<th class="pcell" data-type="func">covergroup</th></tr></thead>';
     tbl.innerHTML = head + "<tbody></tbody>";
@@ -239,7 +242,7 @@ JS = r"""
     tbl.className = "tree";
     var head = "<thead><tr><th>Design unit</th>";
     DATA.codeTypes.forEach(function (tp) {
-      head += "<th class='pcell' data-type='" + tp + "'>" + esc(tp) + "</th>";
+      head += "<th class='pcell' data-type='" + tp + "'>" + esc(typeName(tp)) + "</th>";
     });
     head += '<th class="pcell" data-type="func">covergroup</th></tr></thead>';
     tbl.innerHTML = head + "<tbody></tbody>";
@@ -345,7 +348,7 @@ JS = r"""
       var cov = pts.filter(function (p) { return p.covered; }).length;
       var sc = 100 * cov / pts.length;
       var tr = document.createElement("tr");
-      tr.innerHTML = "<td><a class='type-link' href='#detail/" + kind + "/" + i + "/" + tp + "'>" + esc(tp) + "</a></td>" +
+      tr.innerHTML = "<td><a class='type-link' href='#detail/" + kind + "/" + i + "/" + tp + "'>" + esc(typeName(tp)) + "</a></td>" +
         "<td>" + pts.length + "</td><td>" + cov + " / " + pts.length + "</td>" +
         "<td class='pnum " + cls(sc) + "'>" + sc.toFixed(1) + "%</td>";
       tb.appendChild(tr);
