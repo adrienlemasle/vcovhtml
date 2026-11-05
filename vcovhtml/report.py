@@ -16,6 +16,7 @@ from .model import (
     cg_item_tally,
     is_collapsed_hier,
     is_internal_point,
+    merge_parametrized_points,
     module_base,
 )
 from .report_css import CSS
@@ -95,8 +96,11 @@ def _cg_group_json(g) -> dict:
 
 def build_data(points, source: str) -> dict:
     """Reduce parsed Points to a JSON-serializable report payload."""
-    # Drop Verilator SystemC-runtime units (std, std::process, ...) up front so
-    # they never appear in any view or detail page.
+    # Collapse records reported once per parametrization of a module (a .dat
+    # merged from separately-built variants) so every view sees each record
+    # once; then drop Verilator SystemC-runtime units (std, std::process, ...)
+    # so they never appear in any view or detail page.
+    points = merge_parametrized_points(points)
     points = [p for p in points if not is_internal_point(p)]
 
     # -- functional coverage: attach to modules ------------------------

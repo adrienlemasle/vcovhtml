@@ -20,6 +20,16 @@ Design units:
   of one module groups under a single row.  Verilator's SystemC runtime units
   (``std``, ``std::process``, ``std::semaphore``, ...) are dropped via
   ``is_internal_unit``.
+
+Parametrization variants:
+  A .dat merged from separately-built parametrizations of a module reports
+  the same source record once per variant: identical in every field except
+  the design unit (the page's variant name, and the unit-anchored prefix of
+  a covergroup's hierarchy).  ``merge_parametrized_points`` consolidates
+  records that share both their identity and their instance scope, summing
+  counts (the union semantics of ``verilator_coverage --merge``), so each
+  record is reported once instead of once per parametrization.  Records at
+  different instances stay apart, preserving per-instance granularity.
 """
 from __future__ import annotations
 
@@ -150,6 +160,54 @@ def is_internal_point(p: Point) -> bool:
         if is_internal_unit(seg):
             return True
     return False
+
+def point_identity(p: Point) -> tuple:
+    """A record's identity independent of its design unit.
+
+    Every field except ``page`` (which carries the unit's name, including
+    any parametrization marker) and ``h`` (the instance scope).  Two
+    records for the same source location in the same module -- including
+    different parametrizations of that module -- share an identity.
+    """
+    return (p.t, p.f, p.l, p.n, p.S, p.P, p.s, p.o, p.B, p.Bt, p.C, p.Cb,
+            p.Gw, p.w, p.Fv, p.Ff, p.Ft, p.Fg)
+
+
+def point_scope(p: Point) -> str:
+    """The instance scope of a record.
+
+    Code coverage: the full hierarchy.  Covergroups: the hierarchy minus
+    its first segment, which is the design unit itself and therefore
+    differs between parametrizations of one module.
+    """
+    h = p.h
+    if p.t == "covergroup" and "." in h:
+        h = h.split(".", 1)[1]
+    return h
+
+
+def merge_parametrized_points(points) -> list:
+    """Consolidate records that share both their identity and their scope.
+
+    A .dat merged from several parametrizations of one module contains the
+    same record once per parametrization (differing only in the design
+    unit).  Summing their counts -- the union semantics of
+    `verilator_coverage --merge`: covered when hit in any variant -- makes
+    both the per-instance and per-design-unit views report each record
+    once.  Records at different hierarchies (distinct instances of a
+    module) are left apart, preserving per-instance granularity.
+    """
+    acc = {}
+    order = []
+    for p in points:
+        key = (point_identity(p), point_scope(p))
+        q = acc.get(key)
+        if q is None:
+            acc[key] = p
+            order.append(key)
+        else:
+            q.count += p.count
+    return [acc[k] for k in order]
 
 
 # ---------------------------------------------------------------------------

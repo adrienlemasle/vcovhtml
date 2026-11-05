@@ -11,6 +11,7 @@ from vcovhtml.model import (
     is_collapsed_hier,
     build_code_tree,
     code_tallies,
+    merge_parametrized_points,
     build_covergroups,
     cg_item_tally,
     cg_group_tally,
@@ -199,6 +200,69 @@ class TestDataAndHtml(unittest.TestCase):
         self.assertEqual(parsed["nPoints"], 2)
         self.assertEqual(len(parsed["rows"]), 3)  # root, a, a.b
 
+
+class TestMergeParametrized(unittest.TestCase):
+    def _pt(self, page, h, count, t="line", f="x.v", l=3, o="", B=""):
+        name = ("\x01t\x02" + t + "\x01page\x02" + page + "\x01h\x02" + h +
+                "\x01f\x02" + f + "\x01l\x02%d" % l)
+        if o:
+            name += "\x01o\x02" + o
+        if B:
+            name += "\x01B\x02" + B
+        from vcovhtml.covdat import Point
+        return Point(name=name, count=count, t=t, page=page, h=h, f=f, l=l, o=o, B=B)
+
+    def test_variants_same_instance_merge(self):
+        out = merge_parametrized_points([
+            self._pt("v_line/m__pi1", "tb.dut.u", 2),
+            self._pt("v_line/m__pi2", "tb.dut.u", 3),
+        ])
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].count, 5)
+        self.assertTrue(out[0].covered())
+
+    def test_variants_different_instances_kept(self):
+        out = merge_parametrized_points([
+            self._pt("v_line/m__pi1", "tb.dut.u1", 2),
+            self._pt("v_line/m__pi1", "tb.dut.u2", 0),
+        ])
+        self.assertEqual(len(out), 2)
+
+    def test_distinct_records_same_instance_kept(self):
+        out = merge_parametrized_points([
+            self._pt("v_line/m", "a.b", 1, o="'block'"),
+            self._pt("v_line/m", "a.b", 0, o="'elsif'"),
+        ])
+        self.assertEqual(len(out), 2)
+
+    def test_covergroup_variants_merge_across_unit_prefix(self):
+        out = merge_parametrized_points([
+            self._pt("v_covergroup/m#(1).cg", "m#(1).cg.cp.b[0]", 4,
+                     t="covergroup", B="b[0]"),
+            self._pt("v_covergroup/m#(2).cg", "m#(2).cg.cp.b[0]", 6,
+                     t="covergroup", B="b[0]"),
+        ])
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].count, 10)
+
+    def test_covergroup_different_bins_kept(self):
+        out = merge_parametrized_points([
+            self._pt("v_covergroup/m#(1).cg", "m#(1).cg.cp.b[0]", 4,
+                     t="covergroup", B="b[0]"),
+            self._pt("v_covergroup/m#(1).cg", "m#(1).cg.cp.b[1]", 0,
+                     t="covergroup", B="b[1]"),
+        ])
+        self.assertEqual(len(out), 2)
+
+    def test_build_data_collapses_variants(self):
+        pts = [
+            self._pt("v_line/m__pi1", "a", 2),
+            self._pt("v_line/m__pi2", "a", 3),
+        ]
+        data = build_data(pts, "t")
+        self.assertEqual(data["nPoints"], 1)
+        self.assertEqual(data["summaryCode"]["line"]["hit"], 1)
+        self.assertEqual(data["summaryCode"]["line"]["total"], 1)
 
 if __name__ == "__main__":
     unittest.main()
