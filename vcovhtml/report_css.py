@@ -116,6 +116,7 @@ code.expr, code.net {
 .expr-detail td.expr-sub, .tog-detail td.tog-sub { padding: 6px 10px 14px 30px; background: #fafbfc; }
 .tog-bdet td.tog-bsub { padding: 4px 10px 10px 34px; background: #f4f6f8; }
 table.pts .num, table.pts th.num { text-align: right; }
+table.pts .pcell { white-space: nowrap; }
 table.pts.sub td { padding: 3px 8px; font-size: 13px; }
 th.sortable { cursor: pointer; }
 th.sortable:hover { color: var(--accent); }
