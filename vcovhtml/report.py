@@ -95,37 +95,48 @@ def _cg_group_json(g) -> dict:
     }
 
 
-def fetch_source_lines(points, root):
-    """Read the referenced source lines from disk, if the files resolve.
+_MAX_SRC_FILE = 1 << 20  # 1 MiB; bigger files are never embedded
 
-    The .dat stores only each record's path (relative to where Verilator
-    was run) and line number -- no code.  For every distinct path that
-    resolves under ``root`` (absolute paths are used as-is), the smallest
-    contiguous range covering the requested lines is read and returned as
-    a JSON-friendly map  path -> {"start": n, "lines": [...]}.  Paths that
-    cannot be read are skipped: the report still renders, and the UI shows
-    "source unavailable" for those rows.
+
+def fetch_source_lines(points, root):
+    """Read the full referenced source files, if they resolve.
+
+    The .dat stores each record's path (relative to where Verilator was
+    run, or absolute) and line number -- no code.  Every distinct path
+    that resolves under ``root`` and is at most ``_MAX_SRC_FILE`` bytes is
+    read in one raw read, split into lines, and returned as a
+    JSON-friendly map  path -> {"lines": [...]}.  Unreadable (or too
+    large) paths are skipped: the report still renders, the UI shows
+    "source unavailable" for those rows and leaves their line numbers
+    unlinked.
     """
-    want = {}  # path -> set of line numbers
+    want = set()
     for p in points:
-        if p.t == "covergroup" or not p.f or not p.l:
+        if p.t == "covergroup" or not p.f:
             continue
-        want.setdefault(p.f, set()).add(p.l)
+        want.add(p.f)
     out = {}
-    for path, lines in sorted(want.items()):
+    for path in sorted(want):
         full = path if os.path.isabs(path) else os.path.join(root, path)
         try:
-            with open(full, encoding="utf-8", errors="replace") as fh:
-                text = fh.readlines()
+            size = os.path.getsize(full)
         except OSError:
             continue
-        start = max(min(lines), 1)
-        end = min(max(lines), len(text))
-        if end < start:
+        if size > _MAX_SRC_FILE:
             continue
-        chunk = [ln.rstrip("\n") for ln in text[start - 1:end]]
-        out[path] = {"start": start, "lines": chunk}
+        try:
+            with open(full, "rb") as fh:
+                raw = fh.read()
+        except OSError:
+            continue
+        lines = raw.decode("utf-8", "replace").split("\n")
+        if lines and lines[-1] == "":
+            lines.pop()
+        out[path] = {"lines": lines}
     return out
+
+
+
 
 
 def build_data(points, source: str, root: str = None) -> dict:

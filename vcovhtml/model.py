@@ -75,7 +75,7 @@ def _quoted_end(hier: str, pos: int) -> int:
     return -1
 
 
-def splitHier(hier: str) -> list:
+def _splitHier(hier: str) -> list:
     parts = []
     if not hier:
         return parts
@@ -112,6 +112,26 @@ def splitHier(hier: str) -> list:
             start = dot + 1
     parts.append(hier[start:])
     return parts
+
+
+_HIER_MEMO = {}
+
+
+def splitHier(hier: str) -> list:
+    """Memoized wrapper around ``_splitHier``.
+
+    ``_splitHier`` is pure in its argument, and a coverage .dat holds many
+    points per instance (209k points over a few hundred distinct
+    hierarchies), so each string is parsed once and the segment list is
+    reused by every consumer (internal-unit filter, code tree, ...).
+    """
+    v = _HIER_MEMO.get(hier)
+    if v is None:
+        if len(_HIER_MEMO) > 8192:
+            _HIER_MEMO.clear()
+        v = _splitHier(hier)
+        _HIER_MEMO[hier] = v
+    return v
 
 
 def is_collapsed_hier(hier: str) -> bool:

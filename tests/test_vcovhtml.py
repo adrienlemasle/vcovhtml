@@ -278,8 +278,8 @@ class TestSourceLines(unittest.TestCase):
             pts, _ = parse_dat(p)
             data = build_data(pts, "c.dat", d)
             s = data["src"]["src/x.sv"]
-            self.assertEqual(s["start"], 3)
-            self.assertEqual(s["lines"], ["  a = 1;", "endmodule"])
+            self.assertEqual(s["lines"],
+                             ["module x;", "  int a;", "  a = 1;", "endmodule"])
             self.assertIn("a = 1;", render_html(data))
 
     def test_missing_sources_fall_back(self):
@@ -301,7 +301,19 @@ class TestSourceLines(unittest.TestCase):
                    "\x01l\x022' 5\n")
             pts, _ = parse_dat(p)
             data = build_data(pts, "c.dat", "/nonexistent")
-            self.assertEqual(data["src"][sv]["lines"], ["line two"])
+            self.assertEqual(data["src"][sv]["lines"], ["line one", "line two"])
+
+    def test_size_cap(self):
+        with tempfile.TemporaryDirectory() as d:
+            sv = os.path.join(d, "big.sv")
+            with open(sv, "w") as fh:
+                fh.write("x" * ((1 << 20) + 1))
+            p = os.path.join(d, "c.dat")
+            _write(p, "# SystemC::Coverage-3\n"
+                     "C '\x01t\x02line\x01f\x02big.sv\x01l\x021' 5\n")
+            pts, _ = parse_dat(p)
+            data = build_data(pts, "c.dat", d)
+            self.assertEqual(data["src"], {})
 
 if __name__ == "__main__":
     unittest.main()

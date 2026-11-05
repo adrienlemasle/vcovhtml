@@ -85,6 +85,40 @@ JS = r"""
   function typeName(t) {
     return t === "expr" ? "expression" : t;
   }
+  var SRC = DATA.src || {};
+  var SRC_ORDER = Object.keys(SRC);
+  function srcIdx(f) {
+    return f === undefined ? -1 : SRC_ORDER.indexOf(f);
+  }
+  function srcLine(f, l) {
+    var s = f === undefined ? null : SRC[f];
+    if (!s || !l) return null;
+    var t = s.lines[l - 1];
+    return t === undefined ? null : t;
+  }
+  var HL_KW = {};
+  (function () {
+    "module endmodule input output inout wire reg logic signed unsigned assign if else begin end case endcase for while do repeat forever function endfunction task endtask initial final always always_comb always_ff always_latch localparam parameter defparam generate endgenerate genvar import package struct enum typedef posedge negedge or and not xor nand nor buf strong weak tri tri0 tri1 wand wor real byte shortint longint int void static const default delay event assert assume cover specparam release wait fork join join_none unique parallel casez casex timeunit timeprecision context virtual interface modport endinterface endmodport".split(" ").forEach(function (k) {
+      HL_KW[k] = 1;
+    });
+  })();
+  var HL_RE = /(\/\/[^\n]*|\/\*[\s\S]*?(?:\*\/|$)|"(?:[^"\\\n]|\\.)*|'(?:[^'\\\n]|\\.)*|\b[0-9][\w']*|\b[A-Za-z_]\w*\b)/g;
+  function hl(code) {
+    if (code == null) return "";
+    var out = "", last = 0, m, t, c;
+    HL_RE.lastIndex = 0;
+    while ((m = HL_RE.exec(code)) !== null) {
+      out += esc(code.slice(last, m.index));
+      t = m[0];
+      if (t.charAt(0) === "/") c = "tk-c";
+      else if (t.charAt(0) === '"' || t.charAt(0) === "'") c = "tk-s";
+      else if (t.charAt(0) >= "0" && t.charAt(0) <= "9") c = "tk-n";
+      else c = HL_KW[t] ? "tk-k" : null;
+      out += c ? '<span class="' + c + '">' + esc(t) + "</span>" : esc(t);
+      last = m.index + t.length;
+    }
+    return out + esc(code.slice(last));
+  }
   function summaryCards() {
     var cards = document.createElement("div");
     cards.className = "cards";
@@ -454,17 +488,10 @@ JS = r"""
     var m = last.match(/\[(\*|\d+)\]/);
     return m ? m[1] : "";
   }
-  function srcText(p) {
-    var s = DATA.src && p.file ? DATA.src[p.file] : null;
-    if (!s || !p.line) return null;
-    var i = p.line - s.start;
-    if (i < 0 || i >= s.lines.length) return null;
-    return s.lines[i];
-  }
   function srcCell(p) {
-    var t = srcText(p);
+    var t = srcLine(p.file, p.line);
     if (t === null) return "<span class='dim'>source unavailable</span>";
-    return (t === "") ? "&nbsp;" : esc(t);
+    return (t === "") ? "&nbsp;" : hl(t);
   }
 
   function drawDetail(sec, rows) {
@@ -487,7 +514,8 @@ JS = r"""
     sorted.forEach(function (p) {
       var tr = document.createElement("tr");
       var it = iterOf(p);
-      tr.innerHTML = "<td class='count'>" + p.line + (it ? ' <span class="iter">[' + it + ']</span>' : "") + "</td>" +
+      var li = srcIdx(p.file);
+      tr.innerHTML = "<td class='count'>" + (li >= 0 ? "<a class='line-link' href='#file/" + li + "/" + p.line + "'>" + p.line + "</a>" : p.line) + (it ? ' <span class="iter">[' + it + ']</span>' : "") + "</td>" +
         "<td class='comment'>" + esc(p.comment || "") + "</td>" +
         "<td class='code-line'>" + srcCell(p) + "</td>" +
         "<td class='st " + (p.covered ? "g" : "r") + "'>" + (p.covered ? "covered" : "missed") + "</td>" +
@@ -538,6 +566,7 @@ JS = r"""
       var list = map[k];
       out.push({
         id: idx++,
+        file: list[0].file || "",
         line: list[0].line || 0,
         label: exprLabel(list.map(function (p) { return p.comment || ""; })),
         total: list.length,
@@ -572,7 +601,8 @@ JS = r"""
     sorted.forEach(function (g) {
       var sc = g.total ? 100 * g.hit / g.total : null;
       var row = document.createElement("tr");
-      row.innerHTML = "<td class='num'>" + g.line + "</td>" +
+      var eidx = srcIdx(g.file);
+      row.innerHTML = "<td class='num'>" + (eidx >= 0 ? "<a class='line-link' href='#file/" + eidx + "/" + g.line + "'>" + g.line + "</a>" : g.line) + "</td>" +
         "<td class='name' style='padding-left:8px'><span class='twisty' data-eg='" + g.id + "'>\u25ba</span> <code class='expr'>" +
         esc(g.label) + "</code></td>" +
         "<td class='num'>" + g.total + "</td>" +
@@ -726,7 +756,8 @@ JS = r"""
     sorted.forEach(function (s) {
       var sc = s.totalBits ? 100 * s.hitBits / s.totalBits : null;
       var row = document.createElement("tr");
-      row.innerHTML = "<td class='num'>" + s.line + "</td>" +
+      var sidx = srcIdx(s.file);
+      row.innerHTML = "<td class='num'>" + (sidx >= 0 ? "<a class='line-link' href='#file/" + sidx + "/" + s.line + "'>" + s.line + "</a>" : s.line) + "</td>" +
         "<td class='name' style='padding-left:8px'><span class='twisty' data-tg='" + s.id + "'>\u25ba</span> <code class='net'>" +
         esc(s.base) + "</code></td>" +
         "<td class='num'>" + s.totalBits + "</td>" +
@@ -878,9 +909,45 @@ JS = r"""
     drawDetail(sec, rows);
   }
 
+  function renderFile(idx, target) {
+    var f = SRC_ORDER[idx];
+    if (f === undefined) {
+      render();
+      return;
+    }
+    app.innerHTML = "";
+    app.appendChild(header("Source: " + f.split("/").pop(),
+      "<span class='file'>" + esc(f) + "</span>"));
+    var back = document.createElement("button");
+    back.className = "backbtn";
+    back.innerHTML = "\u2190 Back to report";
+    back.addEventListener("click", function () { location.hash = ""; });
+    app.appendChild(back);
+    var lines = SRC[f].lines;
+    var rows = [];
+    for (var i = 0; i < lines.length; i++) {
+      var n = i + 1;
+      rows.push("<tr" + (n === target ? " class='target'" : "") + ">" +
+        "<td class='num'><a class='line-link' href='#file/" + idx + "/" + n + "'>" + n + "</a></td>" +
+        "<td class='code-line'>" + (lines[i] === "" ? "&nbsp;" : hl(lines[i])) + "</td></tr>");
+    }
+    var tbl = document.createElement("table");
+    tbl.className = "pts";
+    tbl.innerHTML = "<thead><tr><th class='num'>Line</th><th>Source</th></tr></thead><tbody>" +
+      rows.join("") + "</tbody>";
+    app.appendChild(tbl);
+    if (target) {
+      var tr = tbl.querySelector("tr.target");
+      if (tr) tr.scrollIntoView({ block: "center" });
+    }
+  }
   function route() {
     var h = location.hash.replace(/^#/, "");
     var parts = h.split("/").filter(Boolean);
+    if (parts[0] === "file" && parts[1] !== undefined) {
+      renderFile(+parts[1], parts[2] ? +parts[2] : null);
+      return;
+    }
     if (parts[0] === "detail" && parts.length >= 3) {
       var kind = parts[1];
       var i = +parts[2];

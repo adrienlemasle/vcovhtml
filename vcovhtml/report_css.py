@@ -125,4 +125,11 @@ font-size: 12.5px; color: var(--text);
 white-space: pre; overflow-x: auto; max-width: 440px;
 }
 .dim { color: var(--n); font-style: italic; font-size: 12px; }
+td.code-line .tk-c { color: #6a737d; font-style: italic; }
+td.code-line .tk-s { color: #0550ae; }
+td.code-line .tk-n { color: #8250df; }
+td.code-line .tk-k { color: #cf222e; }
+a.line-link { color: var(--accent); text-decoration: none; cursor: pointer; }
+a.line-link:hover { text-decoration: underline; }
+table.pts tr.target td { background: #fff8c5; }
 """

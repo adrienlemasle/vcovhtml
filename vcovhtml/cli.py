@@ -7,7 +7,9 @@ behaviour as `verilator_coverage` when given several inputs).
 
 When a source tree is available (``--source-root``, defaulting to the current
 directory), the report also shows each point's actual source line; rows whose
-files cannot be read degrade gracefully.
+files cannot be read degrade gracefully.  Clicking a line number opens the
+full source file, landed on that line.  ``--no-source`` skips the source
+reading entirely (fastest).
 """
 from __future__ import annotations
 
@@ -80,6 +82,8 @@ def main(argv=None) -> int:
                     help="directory from which the .dat's relative source paths are "
                          "resolved for the source-line view (default: current directory; "
                          "rows degrade gracefully when a file is missing)")
+    ap.add_argument("--no-source", action="store_true",
+                    help="do not read source files at all (fastest; no Source column, no file pages)")
     ap.add_argument("--open", action="store_true",
                     help="open the report in a web browser after writing")
     ap.add_argument("--version", action="version", version="vcovhtml " + __version__)
@@ -96,8 +100,11 @@ def main(argv=None) -> int:
         return 1
 
     source = " ".join(args.input)
-    root = args.source_root or os.getcwd()
+    root = None if args.no_source else (args.source_root or os.getcwd())
     data = build_data(points, source, root)
+    src_n = len(data.get("src") or {})
+    if src_n:
+        print("source lines: %d file(s) embedded" % src_n)
     out = write_report(points, source, args.output, root)
     _print_summary(data)
     print("wrote %s" % out)
