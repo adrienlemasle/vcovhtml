@@ -108,4 +108,14 @@ section.cg .grp-name { font-weight: 600; }
 section.cg .item-name { color: var(--muted); padding-left: 18px; }
 section.cg .bin-row td { font-size: 12px; }
 footer { margin-top: 30px; color: var(--muted); font-size: 12px; }
+.hint { color: #6b7280; font-size: 13px; margin: 8px 0 12px; }
+code.expr {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px; background: #eef1f5; padding: 2px 6px; border-radius: 4px; color: #1f2937;
+}
+.expr-detail td.expr-sub { padding: 6px 10px 14px 30px; background: #fafbfc; }
+table.pts .num, table.pts th.num { text-align: right; }
+table.pts.sub td { padding: 3px 8px; font-size: 13px; }
+th.sortable { cursor: pointer; }
+th.sortable:hover { color: var(--accent); }
 """

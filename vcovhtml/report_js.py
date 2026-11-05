@@ -479,6 +479,142 @@ JS = r"""
       body.appendChild(tr);
     });
   }
+  // ---- expression coverage: group combinations into their parent expression ----
+  function exprInner(o) {
+    var a = o.indexOf("("); var b = o.lastIndexOf(")");
+    return (a >= 0 && b > a) ? o.slice(a + 1, b) : o;
+  }
+  function exprCombo(o) {
+    var res = "1";
+    if (o.indexOf(" => ") >= 0) res = o.split(" => ")[1].trim();
+    var terms = exprInner(o).split(" && ").map(function (t) { return t.trim(); });
+    var ops = []; var vals = [];
+    terms.forEach(function (t) {
+      if (t.indexOf("==") >= 0) {
+        var p = t.split("==");
+        ops.push(p[0].trim());
+        vals.push(p[p.length - 1].trim());
+      } else { ops.push(t); vals.push("?"); }
+    });
+    return { ops: ops, vals: vals, res: res };
+  }
+  function exprLabel(combos) {
+    var full = combos[0];
+    combos.forEach(function (o) {
+      if (o.split("==").length - 1 > full.split("==").length - 1) full = o;
+    });
+    var c = exprCombo(full);
+    if (c.res === "0" && c.vals.every(function (v) { return v === "0"; })) {
+      return c.ops.join(" || ");
+    }
+    return c.ops.map(function (o, i) { return c.vals[i] === "0" ? "!" + o : o; }).join(" && ");
+  }
+  function groupExpr(points) {
+    var map = {};
+    points.forEach(function (p) {
+      var key = (p.file || "") + "#" + p.line + "#" + (p.h || "");
+      (map[key] = map[key] || []).push(p);
+    });
+    var out = [];
+    var idx = 0;
+    Object.keys(map).forEach(function (k) {
+      var list = map[k];
+      out.push({
+        id: idx++,
+        line: list[0].line || 0,
+        label: exprLabel(list.map(function (p) { return p.comment || ""; })),
+        total: list.length,
+        hit: list.filter(function (p) { return p.count > 0; }).length,
+        combos: list
+      });
+    });
+    return out;
+  }
+  var exprSort = { key: "line", dir: "asc" };
+  function exprArrow(key) {
+    return exprSort.key === key ? (exprSort.dir === "asc" ? " \u25b2" : " \u25bc") : "";
+  }
+
+  function drawExprBody(sec, groups) {
+    sec.querySelectorAll("[data-expsort]").forEach(function (th) {
+      var k = th.getAttribute("data-expsort");
+      th.innerHTML = (k === "line" ? "Line" : "Score") + exprArrow(k);
+    });
+    var body = sec.querySelector("table.pts tbody");
+    body.innerHTML = "";
+    var sorted = groups.slice().sort(function (a, b) {
+      var d = (exprSort.dir === "asc") ? 1 : -1;
+      if (exprSort.key === "score") {
+        var sa = a.total ? 100 * a.hit / a.total : 0, sb = b.total ? 100 * b.hit / b.total : 0;
+        if (sa !== sb) return (sb - sa) * d;
+        return (a.line - b.line) * d;
+      }
+      if (a.line !== b.line) return (a.line - b.line) * d;
+      return a.label.localeCompare(b.label);
+    });
+    sorted.forEach(function (g) {
+      var sc = g.total ? 100 * g.hit / g.total : null;
+      var row = document.createElement("tr");
+      row.innerHTML = "<td class='num'>" + g.line + "</td>" +
+        "<td class='name' style='padding-left:8px'><span class='twisty' data-eg='" + g.id + "'>\u25ba</span> <code class='expr'>" +
+        esc(g.label) + "</code></td>" +
+        "<td class='num'>" + g.total + "</td>" +
+        "<td class='num'>" + g.hit + "</td>" +
+        "<td class='pcell'>" + cell(sc) + "</td>";
+      body.appendChild(row);
+      var det = document.createElement("tr");
+      det.className = "expr-detail";
+      det.style.display = "none";
+      det.setAttribute("data-egd", g.id);
+      det.innerHTML = "<td colspan='5' class='expr-sub'><table class='pts sub'><thead><tr>" +
+        "<th>Combination</th><th class='num'>Hits</th><th>Status</th></tr></thead><tbody>" +
+        g.combos.map(function (c) {
+          var hit = c.count > 0;
+          return "<tr><td>" + esc(c.comment || "") + "</td><td class='num'>" + c.count +
+            "</td><td class='st " + (hit ? "g" : "r") + "'>" + (hit ? "covered" : "missed") + "</td></tr>";
+        }).join("") + "</tbody></table></td>";
+      body.appendChild(det);
+    });
+  }
+  function drawExprGroups(sec, points) {
+    var groups = groupExpr(points);
+    if (!groups.length) {
+      sec.innerHTML += "<div class='empty'>No expression points.</div>";
+      return;
+    }
+    sec.innerHTML += "<p class='hint'>" + groups.length + " expression(s) over " + points.length +
+      " combinations. Click the Line or Score header to sort; click an expression to see which combinations are hit or missed.</p>";
+    var tbl = document.createElement("table");
+    tbl.className = "pts";
+    tbl.innerHTML = "<thead><tr>" +
+      "<th class='sortable' data-expsort='line'>Line</th>" +
+      "<th>Expression</th>" +
+      "<th class='num'>Combinations</th>" +
+      "<th class='num'>Covered</th>" +
+      "<th class='sortable' data-expsort='score'>Score</th>" +
+      "</tr></thead><tbody></tbody>";
+    sec.appendChild(tbl);
+    drawExprBody(sec, groups);
+    sec.addEventListener("click", function (e) {
+      var th = e.target.closest("[data-expsort]");
+      var tw = e.target.closest("[data-eg]");
+      if (th) {
+        var key = th.getAttribute("data-expsort");
+        if (exprSort.key === key) exprSort.dir = (exprSort.dir === "asc") ? "desc" : "asc";
+        else { exprSort.key = key; exprSort.dir = (key === "score") ? "desc" : "asc"; }
+        drawExprBody(sec, groups);
+        return;
+      }
+      if (tw) {
+        var gi = tw.getAttribute("data-eg");
+        var det = sec.querySelector("[data-egd='" + gi + "']");
+        var open = det.style.display !== "none";
+        det.style.display = open ? "none" : "";
+        tw.textContent = open ? "\u25ba" : "\u25bc";
+      }
+    });
+  }
+
   function renderTypeDetail(kind, i, type) {
     var r = kind === "inst" ? instRows[i] : duRows[i];
     app.innerHTML = "";
@@ -511,6 +647,13 @@ JS = r"""
       return;
     }
     var rows = (r.points || []).filter(function (p) { return p.type === type; });
+    if (type === "expr") {
+      var esec = document.createElement("section");
+      esec.innerHTML = "<h2>Expression coverage</h2>";
+      app.appendChild(esec);
+      drawExprGroups(esec, rows);
+      return;
+    }
     if (!sortState[type]) sortState[type] = { key: "line", dir: "asc" };
     var sec = document.createElement("section");
     sec.innerHTML = "<h2>" + esc(type) + " coverage (" + rows.length + " points)</h2>";
