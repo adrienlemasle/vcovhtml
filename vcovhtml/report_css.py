@@ -155,9 +155,7 @@ pre.filesrc .fline.target { background: #fff8c5; }
   overflow: auto; padding: 10px; margin-bottom: 10px;
 }
 .fsmgraph .eg { stroke: var(--green); stroke-width: 2; fill: none; }
-.fsmgraph .em { stroke: var(--red); stroke-width: 1.5; fill: none; stroke-dasharray: 5 4; }
-.fsmgraph .ea { stroke: #8b949e; stroke-width: 1.2; fill: none; stroke-dasharray: 4 4; }
-.fsmgraph .eg:hover, .fsmgraph .em:hover, .fsmgraph .ea:hover { stroke-width: 3; }
+.fsmgraph .eg:hover { stroke-width: 3; }
 .fsmg-sig { padding: 6px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; margin-bottom: 6px; }
 .fsmg-sig .twisty { display: inline-block; width: 16px; cursor: pointer; color: var(--muted); }
 .fsmg-sig .muted { color: var(--muted); font-size: 12.5px; margin-left: 6px; }

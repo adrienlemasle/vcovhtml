@@ -1138,24 +1138,43 @@ JS = r"""
     var t = Math.min(tx, ty);
     return { x: px + dx * t, y: py + dy * t };
   }
-  // Order states along the actual transition flow: longest-path layering over
-  // the real (non-artificial) arcs, with a barycenter re-order inside each
-  // layer. The reset/initial state (the target of the artificial arcs) comes
-  // first so its return edges fan out cleanly instead of crossing the flow.
-  // Longest-path layering over the real arcs, with a barycenter re-order
-  // inside each layer to minimise crossings. Returns the per-layer grouping
-  // (a flat flow order can be derived by reading the layers in sequence).
-  // Longest-path layering over the real arcs, with a barycenter re-order
-  // inside each layer to minimise crossings. Returns the per-layer grouping
-  // (a flat flow order can be derived by reading the layers in sequence).
-  // Longest-path layering over the real arcs, with a barycenter re-order
-  // inside each layer to minimise crossings.
-  function fsmLayered(states, realArcs) {
+  // Order states along the actual transition flow. A DFS from the initial
+  // state over the drawn arcs splits them into normal edges and back edges
+  // (returns to ancestors); back edges are set aside and longest-path
+  // layering over the rest is acyclic by construction, so the rows follow
+  // the real flow from the entry. A barycenter re-order inside each layer
+  // (seeded by discovery order) minimises crossings. Returns the per-layer
+  // grouping, the DFS order, and the back-edge list.
+  function fsmLayered(states, arcs, initState) {
+    var adj = {};
+    states.forEach(function (s) { adj[s] = []; });
+    arcs.forEach(function (e) { adj[e.a].push(e); });
+    var color = {};
+    states.forEach(function (s) { color[s] = 0; });
+    var order = [];
+    var back = [];
+    function dfs(u) {
+      color[u] = 1;
+      order.push(u);
+      adj[u].forEach(function (e) {
+        var v = e.b;
+        if (color[v] === 0) {
+          dfs(v);
+        } else if (color[v] === 1) {
+          e.back = true;
+          back.push(e);
+        }
+      });
+      color[u] = 2;
+    }
+    if (initState && color[initState] === 0) dfs(initState);
+    states.forEach(function (s) { if (color[s] === 0) dfs(s); });
     var layer = {};
     states.forEach(function (s) { layer[s] = 0; });
+    var fwd = arcs.filter(function (e) { return !e.back; });
     for (var it = 0; it < states.length; it++) {
       var ch = false;
-      realArcs.forEach(function (e) {
+      fwd.forEach(function (e) {
         if (layer[e.b] < layer[e.a] + 1) { layer[e.b] = layer[e.a] + 1; ch = true; }
       });
       if (!ch) break;
@@ -1166,12 +1185,12 @@ JS = r"""
     for (var L = 0; L <= maxL; L++) byLayer.push([]);
     states.forEach(function (s) { byLayer[layer[s]].push(s); });
     var pos = {};
-    states.forEach(function (s, i) { pos[s] = i; });
+    order.forEach(function (s, i) { pos[s] = i; });
     for (var L2 = 1; L2 <= maxL; L2++) {
       var score = {};
       byLayer[L2].forEach(function (s) {
         var sum = 0, n = 0;
-        realArcs.forEach(function (e) {
+        fwd.forEach(function (e) {
           if (e.b === s && layer[e.a] === L2 - 1) { sum += pos[e.a]; n++; }
         });
         score[s] = n ? sum / n : pos[s];
@@ -1182,12 +1201,14 @@ JS = r"""
       });
       byLayer[L2].forEach(function (s, i2) { pos[s] = i2; });
     }
-    return { byLayer: byLayer, layer: layer };
+    return { byLayer: byLayer, layer: layer, order: order, back: back };
   }
   // Vertical layout: one horizontal row per layer, top-to-bottom. The reset
   // hub (initial state) is pinned to its own top row; boxes are sized to the
-  // label so text never overflows.
-  function fsmRowPos(byLayer, initState) {
+  // label so text never overflows. The side margins are widened to fit the
+  // outer lanes that return (back) edges travel in, so a dense hub can have
+  // several parallel return lanes without any of them touching a box.
+  function fsmRowPos(byLayer, initState, upCount) {
     var vgap = 54, hgap = 40, nh = 26;
     var nw = {};
     byLayer.forEach(function (layer) {
@@ -1207,53 +1228,33 @@ JS = r"""
     });
     var maxW = 0;
     rowW.forEach(function (w) { if (w > maxW) maxW = w; });
-    var totalW = maxW + 60;
+    // Margins are sized for the worst case (every return nested on that
+    // side), so the corridor positions computed after placement always fit
+    // inside the svg.
+    var marginL = upCount ? 14 * upCount + 14 : 26;
+    var marginR = upCount ? 14 * upCount + 14 : 26;
+    var totalW = maxW + marginL + marginR;
     var totalH = rows.length * (nh + vgap) - vgap + 60;
     var pos = {}, row = {};
     rows.forEach(function (r, ri) {
       var y = 30 + ri * (nh + vgap) + nh / 2;
-      var x = (totalW - rowW[ri]) / 2;
+      var x = marginL + (totalW - marginL - marginR - rowW[ri]) / 2;
       r.forEach(function (s) {
         pos[s] = { x: x + nw[s] / 2, y: y };
         row[s] = ri;
         x += nw[s] + hgap;
       });
     });
-    return { pos: pos, w: totalW, h: totalH, nw: nw, row: row };
+    return { pos: pos, w: totalW, h: totalH, nw: nw, row: row, rows: rows,
+             marginL: marginL, marginR: marginR };
   }
-  // SVG for a single fsm signal's state graph (vertical layout, reset hub on
-  // top). Real design transitions and any arc that was hit are drawn; un-hit
-  // "artificial" reset arcs are omitted and counted in a note instead.
-  // SVG for a single fsm signal's state graph (vertical layout, reset hub on
-  // top). Only covered (hit) transitions are drawn; uncovered paths are
-  // counted in a note. Spanning returns to the hub are routed through an outer
-  // lane so they never cross a state box.
+  // SVG for a single fsm signal's state graph (vertical layout, the initial
+  // state pinned to the top). Only covered (hit) transitions are drawn;
+  // uncovered paths are counted in a note. Spanning returns to the hub are
+  // routed through an outer lane so they never cross a state box.
   function fsmSignalGraphSvg(allPoints) {
     var arcs = allPoints.filter(function (p) { return p.type === "fsm_arc"; });
     if (!arcs.length) return "";
-    var artTargets = {};
-    arcs.forEach(function (p) {
-      if (p.tag === "artificial") {
-        var t = fsmParts(p.comment).detail.split("->")[1];
-        if (t) artTargets[t] = (artTargets[t] || 0) + 1;
-      }
-    });
-    var initState = null, best = 0;
-    Object.keys(artTargets).forEach(function (t) {
-      if (artTargets[t] > best) { best = artTargets[t]; initState = t; }
-    });
-    var set = {};
-    arcs.forEach(function (p) {
-      fsmParts(p.comment).detail.split("->").forEach(function (s) { if (s) set[s] = true; });
-    });
-    var states = Object.keys(set);
-    var realArcs = arcs.filter(function (p) { return p.tag !== "artificial"; })
-      .map(function (p) {
-        var d = fsmParts(p.comment).detail.split("->");
-        return { a: d[0], b: d[1] };
-      });
-    var lay2 = fsmLayered(states, realArcs);
-    var lay = fsmRowPos(lay2.byLayer, initState);
     var stateHits = {};
     allPoints.forEach(function (p) {
       if (p.type === "fsm_state") {
@@ -1264,14 +1265,113 @@ JS = r"""
         }
       }
     });
+    // The initial/reset state. Verilator dumps come in two flavors:
+    //   - older: only the synthetic reset arcs (from every state to the
+    //     initial state) are tagged, so it is the target of the most (the
+    //     only) artificial arcs;
+    //   - newer: the whole arc space is tagged (every non-design pair is
+    //     artificial), so it is instead the target of the most real arcs --
+    //     the state the flow converges on; ties go to the most-hit state.
+    var artTargets = {}, realTargets = {};
+    arcs.forEach(function (p) {
+      var t = fsmParts(p.comment).detail.split("->")[1];
+      if (!t) return;
+      if (p.tag === "artificial") artTargets[t] = (artTargets[t] || 0) + 1;
+      else realTargets[t] = (realTargets[t] || 0) + 1;
+    });
+    var initState = null;
+    if (Object.keys(artTargets).length <= 2) {
+      var bestA = 0;
+      Object.keys(artTargets).forEach(function (t) {
+        if (artTargets[t] > bestA) { bestA = artTargets[t]; initState = t; }
+      });
+    } else {
+      var bestR = -1, bestH = -1;
+      Object.keys(realTargets).forEach(function (t) {
+        var r = realTargets[t], h = stateHits[t] || 0;
+        if (r > bestR || (r === bestR && h > bestH)) { bestR = r; bestH = h; initState = t; }
+      });
+    }
+    var set = {};
+    arcs.forEach(function (p) {
+      fsmParts(p.comment).detail.split("->").forEach(function (s) { if (s) set[s] = true; });
+    });
+    var states = Object.keys(set);
+    var drawn = arcs.filter(function (p) { return p.count > 0; })
+      .map(function (p) {
+        var d = fsmParts(p.comment).detail.split("->");
+        return { a: d[0], b: d[1] };
+      });
+    var lay2 = fsmLayered(states, drawn, initState);
+    var lay = fsmRowPos(lay2.byLayer, initState, drawn.length);
+    // “Long” arcs — every drawn arc that is not a straight vertical
+    // between adjacent rows (returns included) — travel in
+    // right-angle corridors; the margin is recomputed for their
+    // exact count (relative x distances are invariant under the
+    // re-centering).
+    var longList = drawn.filter(function (e) {
+      var sp = Math.abs(lay.row[e.a] - lay.row[e.b]);
+      return !(sp === 1 && Math.abs(lay.pos[e.b].x - lay.pos[e.a].x) < 24);
+    });
+    if (longList.length !== drawn.length) lay = fsmRowPos(lay2.byLayer, initState, longList.length);
+    // Returns (back edges) travel in right-angle corridors: a horizontal
+    // stub out of the source side, a vertical run, a horizontal stub into
+    // the target side. Each run is placed outside the widest box of every
+    // row it spans, so it can never cross a box; parallel returns get
+    // nested corridors. The side is the one with fewer same-row boxes
+    // between the source and the corridor (ties alternate, so returns to a
+    // dense hub fan out symmetrically). When several edges leave or enter
+    // the same box, their anchors are spread along the box side so
+    // arrowheads never stack on one spot.
+    var laneMap = {}, corr = { left: 0, right: 0 };
+    var sc = {}, ec = {}, sUsed = {}, eUsed = {}, laneNo = { left: 0, right: 0 };
+    longList.forEach(function (e) {
+      var lo = Math.min(lay.row[e.a], lay.row[e.b]);
+      var hi = Math.max(lay.row[e.a], lay.row[e.b]);
+      var maxR = -1e9, minL = 1e9;
+      for (var r = lo; r <= hi; r++) lay.rows[r].forEach(function (s) {
+        var re = lay.pos[s].x + lay.nw[s] / 2;
+        var le = lay.pos[s].x - lay.nw[s] / 2;
+        if (re > maxR) maxR = re;
+        if (le < minL) minL = le;
+      });
+      var rightBoxes = 0, leftBoxes = 0;
+      lay.rows[lay.row[e.a]].forEach(function (s) {
+        if (s !== e.a && (lay.pos[s].x > lay.pos[e.a].x ? rightBoxes++ : leftBoxes++));
+      });
+      var upEdge = lay.row[e.b] < lay.row[e.a];
+      var edx = lay.pos[e.b].x - lay.pos[e.a].x;
+      var side;
+      if (!upEdge && edx !== 0) side = edx > 0 ? "right" : "left";
+      else if (rightBoxes !== leftBoxes) side = rightBoxes < leftBoxes ? "right" : "left";
+      else side = (laneNo.left + laneNo.right) % 2 ? "right" : "left";
+      var sk = e.a + "|" + side;
+      sc[sk] = (sc[sk] || 0) + 1;
+      ec[e.b] = (ec[e.b] || 0) + 1;
+      var si = (sUsed[sk] = (sUsed[sk] || 0) + 1) - 1;
+      var ei = (eUsed[e.b] = (eUsed[e.b] || 0) + 1) - 1;
+      var soff = Math.max(-8, Math.min(8, (si - (sc[sk] - 1) / 2) * 8));
+      var eoff = Math.max(-8, Math.min(8, (ei - (ec[e.b] - 1) / 2) * 8));
+      var laneX = side === "right"
+        ? maxR + 14 + 14 * laneNo.right
+        : minL - 14 - 14 * laneNo.left;
+      if (side === "right") { corr.right = Math.max(corr.right, laneX); laneNo.right++; }
+      else { corr.left = Math.min(corr.left, laneX); laneNo.left++; }
+      var tRight = 0, tLeft = 0;
+      lay.rows[lay.row[e.b]].forEach(function (s2) {
+        if (s2 !== e.b && (lay.pos[s2].x > lay.pos[e.b].x ? tRight++ : tLeft++));
+      });
+      // a head-on run at the anchor's y is only crossing-free if
+      // no sibling box on that row sits between the box and the lane
+      laneMap[e.a + "->" + e.b] = { side: side, laneX: laneX, soff: soff, eoff: eoff,
+        sClear: (side === "left" ? leftBoxes : rightBoxes) === 0,
+        eClear: (side === "left" ? tLeft : tRight) === 0 };
+    });
     var skipped = 0;
     var svg = '<svg class="fsmgraph" viewBox="0 0 ' + lay.w + ' ' + lay.h +
       '" width="' + lay.w + '" height="' + lay.h + '"><defs>' +
       '<marker id="arrg" markerWidth="9" markerHeight="9" refX="8" refY="3.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3.5 L0,7 Z" fill="#1a7f37"/></marker>' +
-      '<marker id="arrm" markerWidth="9" markerHeight="9" refX="8" refY="3.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3.5 L0,7 Z" fill="#cf222e"/></marker>' +
-      '<marker id="arrga" markerWidth="9" markerHeight="9" refX="8" refY="3.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3.5 L0,7 Z" fill="#8b949e"/></marker>' +
       '</defs>';
-    var retNo = 0;
     var ah = 13;
     function anc(pt, w, side) {
       if (side === "top") return { x: pt.x, y: pt.y - ah };
@@ -1289,13 +1389,11 @@ JS = r"""
       var d = fsmParts(p.comment).detail.split("->");
       var a = d[0], b = d[1];
       if (!(a in lay.pos) || !(b in lay.pos)) return;
-      var art = p.tag === "artificial";
       var hit = p.count > 0;
       if (!hit) { skipped++; return; }
-      var title = esc(a + " \u2192 " + b + " \u2014 " + p.count + " hit(s) \u2014 " +
-        (art ? "artificial, " : "") + "covered");
-      var cls = art ? "ea" : "eg";
-      var mark = art ? "arrga" : "arrg";
+      var title = esc(a + " \u2192 " + b + " \u2014 " + p.count + " hit(s) \u2014 covered");
+      var cls = "eg";
+      var mark = "arrg";
       var pa = lay.pos[a], pb = lay.pos[b];
       var wa = lay.nw[a], wb = lay.nw[b];
       var dx = pb.x - pa.x;
@@ -1305,38 +1403,48 @@ JS = r"""
           ' C ' + (pa.x - wa / 2 - 10) + ' ' + (pa.y - 34) + ', ' + (pa.x + wa / 2 + 10) + ' ' + (pa.y - 34) +
           ', ' + (pa.x + wa / 4) + ' ' + (pa.y - 13);
       } else {
-        var up = lay.row[b] < lay.row[a];
         var span = Math.abs(lay.row[a] - lay.row[b]);
-        var ss, es, spt, ept, c1, c2;
-        if (up && span > 1) {
-          // spanning return to the hub: outer lane on the side the source is on
-          var left = pa.x < lay.w / 2;
-          var laneX = left ? 18 : (lay.w - 18);
-          ss = es = left ? "left" : "right";
-          spt = anc(pa, wa, ss);
-          ept = anc(pb, wb, es);
-          c1 = { x: laneX, y: spt.y };
-          c2 = { x: laneX, y: ept.y };
+        if (span === 1 && Math.abs(dx) < 24) {
+          // straight vertical between adjacent rows
+          var spt = anc(pa, wa, "bottom");
+          var ept = anc(pb, wb, "top");
+          var c1 = ctl(spt, "bottom", 26);
+          var c2 = ctl(ept, "top", 26);
+          dstr = 'M ' + spt.x.toFixed(1) + ' ' + spt.y.toFixed(1) +
+            ' C ' + c1.x.toFixed(1) + ' ' + c1.y.toFixed(1) + ', ' + c2.x.toFixed(1) + ' ' + c2.y.toFixed(1) +
+            ', ' + ept.x.toFixed(1) + ' ' + ept.y.toFixed(1);
         } else {
-          if (!up) {
-            if (Math.abs(dx) < 24) { ss = "bottom"; es = "top"; }
-            else { var fd = dx > 0 ? 1 : -1; ss = fd > 0 ? "right" : "left"; es = fd > 0 ? "left" : "right"; }
-          } else if (span === 1 && Math.abs(dx) < 24) {
-            ss = "top"; es = "bottom";
+          // long edge (a return or a skip), routed either way:
+          // a right-angle corridor. Both ends leave/enter the box
+          // head-on (perpendicular to the side) whenever the run
+          // to the lane is clear of sibling boxes; otherwise that
+          // end steps along the side into the row gap instead
+          // (still crossing-free). A clear end is a single straight
+          // horizontal to the lane; the vertical run sits in the
+          // lane, outside every box the edge spans, and spread
+          // anchors keep stacked arrowheads apart
+          var lm = laneMap[a + "->" + b] ||
+            { side: "left", laneX: 16, soff: 0, eoff: 0, sClear: false, eClear: false };
+          var sdx = lm.side === "left" ? -1 : 1;
+          var g = 24;
+          var sx = (pa.x + sdx * wa / 2).toFixed(1), ex = (pb.x + sdx * wb / 2).toFixed(1);
+          var sy0 = (pa.y + lm.soff).toFixed(1), ey0 = (pb.y + lm.eoff).toFixed(1);
+          dstr = 'M ' + sx + ' ' + sy0;
+          if (lm.sClear) {
+            dstr += ' L ' + lm.laneX.toFixed(1) + ' ' + sy0;
           } else {
-            var rd = dx !== 0 ? (dx > 0 ? 1 : -1) : ((retNo % 2) ? 1 : -1);
-            ss = rd > 0 ? "right" : "left";
-            es = rd > 0 ? "left" : "right";
+            dstr += ' L ' + sx + ' ' + (pa.y + lm.soff + g).toFixed(1) +
+              ' L ' + lm.laneX.toFixed(1) + ' ' + (pa.y + lm.soff + g).toFixed(1);
           }
-          retNo++;
-          spt = anc(pa, wa, ss);
-          ept = anc(pb, wb, es);
-          c1 = ctl(spt, ss, (ss === "top" || ss === "bottom") ? 26 : (wa / 2 + 26));
-          c2 = ctl(ept, es, (es === "top" || es === "bottom") ? 26 : (wb / 2 + 26));
+          if (lm.eClear) {
+            dstr += ' L ' + lm.laneX.toFixed(1) + ' ' + ey0 +
+              ' L ' + ex + ' ' + ey0;
+          } else {
+            dstr += ' L ' + lm.laneX.toFixed(1) + ' ' + (pb.y + lm.eoff + g).toFixed(1) +
+              ' L ' + ex + ' ' + (pb.y + lm.eoff + g).toFixed(1) +
+              ' L ' + ex + ' ' + ey0;
+          }
         }
-        dstr = 'M ' + spt.x.toFixed(1) + ' ' + spt.y.toFixed(1) +
-          ' C ' + c1.x.toFixed(1) + ' ' + c1.y.toFixed(1) + ', ' + c2.x.toFixed(1) + ' ' + c2.y.toFixed(1) +
-          ', ' + ept.x.toFixed(1) + ' ' + ept.y.toFixed(1);
       }
       svg += '<path class="' + cls + '" d="' + dstr + '" marker-end="url(#' + mark + ')"><title>' + title + '</title></path>';
     });
