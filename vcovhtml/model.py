@@ -121,9 +121,8 @@ def splitHier(hier: str) -> list:
     """Memoized wrapper around ``_splitHier``.
 
     ``_splitHier`` is pure in its argument, and a coverage .dat holds many
-    points per instance (209k points over a few hundred distinct
-    hierarchies), so each string is parsed once and the segment list is
-    reused by every consumer (internal-unit filter, code tree, ...).
+    points per instance, so each string is parsed once and the segment list
+    is reused by every consumer (internal-unit filter, code tree, ...).
     """
     v = _HIER_MEMO.get(hier)
     if v is None:
