@@ -35,6 +35,7 @@ def _point_json(p: Point) -> dict:
         "l": p.l,
         "o": p.o,
         "h": hseg,
+        "tag": p.Fg or None,
         "count": p.count,
         "s": p.s,
         "covered": p.covered(),

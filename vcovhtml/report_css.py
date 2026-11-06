@@ -142,4 +142,30 @@ white-space: pre; overflow: auto; max-height: calc(100vh - 150px);
 }
 pre.filesrc .ln { display: inline-block; width: 3.4em; margin-right: 12px; text-align: right; color: var(--muted); user-select: none; }
 pre.filesrc .fline.target { background: #fff8c5; }
+.fsmview { margin: 0 0 10px; }
+.fsmview .fview {
+  font: inherit; font-size: 12.5px; padding: 3px 12px; margin-right: 8px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+  color: var(--muted); cursor: pointer;
+}
+.fsmview .fview.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.fsmview .fview:hover:not(.on) { border-color: var(--accent); color: var(--accent); }
+.fsmgraphwrap {
+  border: 1px solid var(--line); border-radius: 6px; background: var(--panel);
+  overflow: auto; padding: 10px; margin-bottom: 10px;
+}
+.fsmgraph .eg { stroke: var(--green); stroke-width: 2; fill: none; }
+.fsmgraph .em { stroke: var(--red); stroke-width: 1.5; fill: none; stroke-dasharray: 5 4; }
+.fsmgraph .ea { stroke: #8b949e; stroke-width: 1.2; fill: none; stroke-dasharray: 4 4; }
+.fsmgraph .eg:hover, .fsmgraph .em:hover, .fsmgraph .ea:hover { stroke-width: 3; }
+.fsmg-sig { padding: 6px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; margin-bottom: 6px; }
+.fsmg-sig .twisty { display: inline-block; width: 16px; cursor: pointer; color: var(--muted); }
+.fsmg-sig .muted { color: var(--muted); font-size: 12.5px; margin-left: 6px; }
+.fsmg-det { margin: 0 0 12px 22px; }
+.fsmgraph .nd text { font-size: 12px; font-weight: 600; }
+.fsmgraph .nd.ng rect { fill: var(--green-bg); stroke: var(--green); }
+.fsmgraph .nd.ng text { fill: var(--green); }
+.fsmgraph .nd.nr rect { fill: var(--red-bg); stroke: var(--red); }
+.fsmgraph .nd.nr text { fill: var(--red); }
+.fsmnote { font-size: 11.5px; color: var(--text-dim); margin: 8px 0 0; }
 """

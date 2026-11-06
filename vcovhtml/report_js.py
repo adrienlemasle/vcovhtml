@@ -33,6 +33,7 @@ JS = r"""
         count: p.count,
         covered: p.covered,
         h: p.h,
+        tag: p.tag,
       };
     }
     (DATA.rows || []).forEach(function (r) { r.points = (r.points || []).map(n); });
@@ -1116,6 +1117,289 @@ JS = r"""
     });
   }
 
+  // ---- fsm_arc: switchable graph view (states = nodes, transitions = edges) ----
+  var fsmArcView = "table";
+  function fsmViewBtns() {
+    var div = document.createElement("div");
+    div.className = "fsmview";
+    [["table", "Table"], ["graph", "Graph"]].forEach(function (v) {
+      var b = document.createElement("button");
+      b.className = "fview" + (fsmArcView === v[0] ? " on" : "");
+      b.textContent = v[1];
+      b.setAttribute("data-fview", v[0]);
+      div.appendChild(b);
+    });
+    return div;
+  }
+  function rectExit(px, py, w, h, qx, qy, pad) {
+    var dx = qx - px, dy = qy - py;
+    var tx = Math.abs(dx) > 1e-9 ? (w / 2 + pad) / Math.abs(dx) : Infinity;
+    var ty = Math.abs(dy) > 1e-9 ? (h / 2 + pad) / Math.abs(dy) : Infinity;
+    var t = Math.min(tx, ty);
+    return { x: px + dx * t, y: py + dy * t };
+  }
+  // Order states along the actual transition flow: longest-path layering over
+  // the real (non-artificial) arcs, with a barycenter re-order inside each
+  // layer. The reset/initial state (the target of the artificial arcs) comes
+  // first so its return edges fan out cleanly instead of crossing the flow.
+  // Longest-path layering over the real arcs, with a barycenter re-order
+  // inside each layer to minimise crossings. Returns the per-layer grouping
+  // (a flat flow order can be derived by reading the layers in sequence).
+  // Longest-path layering over the real arcs, with a barycenter re-order
+  // inside each layer to minimise crossings. Returns the per-layer grouping
+  // (a flat flow order can be derived by reading the layers in sequence).
+  // Longest-path layering over the real arcs, with a barycenter re-order
+  // inside each layer to minimise crossings.
+  function fsmLayered(states, realArcs) {
+    var layer = {};
+    states.forEach(function (s) { layer[s] = 0; });
+    for (var it = 0; it < states.length; it++) {
+      var ch = false;
+      realArcs.forEach(function (e) {
+        if (layer[e.b] < layer[e.a] + 1) { layer[e.b] = layer[e.a] + 1; ch = true; }
+      });
+      if (!ch) break;
+    }
+    var maxL = 0;
+    states.forEach(function (s) { if (layer[s] > maxL) maxL = layer[s]; });
+    var byLayer = [];
+    for (var L = 0; L <= maxL; L++) byLayer.push([]);
+    states.forEach(function (s) { byLayer[layer[s]].push(s); });
+    var pos = {};
+    states.forEach(function (s, i) { pos[s] = i; });
+    for (var L2 = 1; L2 <= maxL; L2++) {
+      var score = {};
+      byLayer[L2].forEach(function (s) {
+        var sum = 0, n = 0;
+        realArcs.forEach(function (e) {
+          if (e.b === s && layer[e.a] === L2 - 1) { sum += pos[e.a]; n++; }
+        });
+        score[s] = n ? sum / n : pos[s];
+      });
+      byLayer[L2].sort(function (a, b) {
+        var d = score[a] - score[b];
+        return d !== 0 ? d : a.localeCompare(b);
+      });
+      byLayer[L2].forEach(function (s, i2) { pos[s] = i2; });
+    }
+    return { byLayer: byLayer, layer: layer };
+  }
+  // Vertical layout: one horizontal row per layer, top-to-bottom. The reset
+  // hub (initial state) is pinned to its own top row; boxes are sized to the
+  // label so text never overflows.
+  function fsmRowPos(byLayer, initState) {
+    var vgap = 54, hgap = 40, nh = 26;
+    var nw = {};
+    byLayer.forEach(function (layer) {
+      layer.forEach(function (s) { nw[s] = s.length * 7.4 + 22; });
+    });
+    var rows = [];
+    if (initState) rows.push([initState]);
+    byLayer.forEach(function (layer) {
+      var r = layer.filter(function (s) { return s !== initState; });
+      if (r.length) rows.push(r);
+    });
+    var rowW = [];
+    rows.forEach(function (r) {
+      var w = 0;
+      r.forEach(function (s, i) { if (i) w += hgap; w += nw[s]; });
+      rowW.push(w);
+    });
+    var maxW = 0;
+    rowW.forEach(function (w) { if (w > maxW) maxW = w; });
+    var totalW = maxW + 60;
+    var totalH = rows.length * (nh + vgap) - vgap + 60;
+    var pos = {}, row = {};
+    rows.forEach(function (r, ri) {
+      var y = 30 + ri * (nh + vgap) + nh / 2;
+      var x = (totalW - rowW[ri]) / 2;
+      r.forEach(function (s) {
+        pos[s] = { x: x + nw[s] / 2, y: y };
+        row[s] = ri;
+        x += nw[s] + hgap;
+      });
+    });
+    return { pos: pos, w: totalW, h: totalH, nw: nw, row: row };
+  }
+  // SVG for a single fsm signal's state graph (vertical layout, reset hub on
+  // top). Real design transitions and any arc that was hit are drawn; un-hit
+  // "artificial" reset arcs are omitted and counted in a note instead.
+  // SVG for a single fsm signal's state graph (vertical layout, reset hub on
+  // top). Only covered (hit) transitions are drawn; uncovered paths are
+  // counted in a note. Spanning returns to the hub are routed through an outer
+  // lane so they never cross a state box.
+  function fsmSignalGraphSvg(allPoints) {
+    var arcs = allPoints.filter(function (p) { return p.type === "fsm_arc"; });
+    if (!arcs.length) return "";
+    var artTargets = {};
+    arcs.forEach(function (p) {
+      if (p.tag === "artificial") {
+        var t = fsmParts(p.comment).detail.split("->")[1];
+        if (t) artTargets[t] = (artTargets[t] || 0) + 1;
+      }
+    });
+    var initState = null, best = 0;
+    Object.keys(artTargets).forEach(function (t) {
+      if (artTargets[t] > best) { best = artTargets[t]; initState = t; }
+    });
+    var set = {};
+    arcs.forEach(function (p) {
+      fsmParts(p.comment).detail.split("->").forEach(function (s) { if (s) set[s] = true; });
+    });
+    var states = Object.keys(set);
+    var realArcs = arcs.filter(function (p) { return p.tag !== "artificial"; })
+      .map(function (p) {
+        var d = fsmParts(p.comment).detail.split("->");
+        return { a: d[0], b: d[1] };
+      });
+    var lay2 = fsmLayered(states, realArcs);
+    var lay = fsmRowPos(lay2.byLayer, initState);
+    var stateHits = {};
+    allPoints.forEach(function (p) {
+      if (p.type === "fsm_state") {
+        var i2 = p.comment.indexOf("::");
+        if (i2 >= 0) {
+          var sn = p.comment.slice(i2 + 2);
+          stateHits[sn] = (stateHits[sn] || 0) + p.count;
+        }
+      }
+    });
+    var skipped = 0;
+    var svg = '<svg class="fsmgraph" viewBox="0 0 ' + lay.w + ' ' + lay.h +
+      '" width="' + lay.w + '" height="' + lay.h + '"><defs>' +
+      '<marker id="arrg" markerWidth="9" markerHeight="9" refX="8" refY="3.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3.5 L0,7 Z" fill="#1a7f37"/></marker>' +
+      '<marker id="arrm" markerWidth="9" markerHeight="9" refX="8" refY="3.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3.5 L0,7 Z" fill="#cf222e"/></marker>' +
+      '<marker id="arrga" markerWidth="9" markerHeight="9" refX="8" refY="3.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3.5 L0,7 Z" fill="#8b949e"/></marker>' +
+      '</defs>';
+    var retNo = 0;
+    var ah = 13;
+    function anc(pt, w, side) {
+      if (side === "top") return { x: pt.x, y: pt.y - ah };
+      if (side === "bottom") return { x: pt.x, y: pt.y + ah };
+      if (side === "left") return { x: pt.x - w / 2, y: pt.y };
+      return { x: pt.x + w / 2, y: pt.y };
+    }
+    function ctl(pt, side, ext) {
+      if (side === "top") return { x: pt.x, y: pt.y - ext };
+      if (side === "bottom") return { x: pt.x, y: pt.y + ext };
+      if (side === "left") return { x: pt.x - ext, y: pt.y };
+      return { x: pt.x + ext, y: pt.y };
+    }
+    arcs.forEach(function (p) {
+      var d = fsmParts(p.comment).detail.split("->");
+      var a = d[0], b = d[1];
+      if (!(a in lay.pos) || !(b in lay.pos)) return;
+      var art = p.tag === "artificial";
+      var hit = p.count > 0;
+      if (!hit) { skipped++; return; }
+      var title = esc(a + " \u2192 " + b + " \u2014 " + p.count + " hit(s) \u2014 " +
+        (art ? "artificial, " : "") + "covered");
+      var cls = art ? "ea" : "eg";
+      var mark = art ? "arrga" : "arrg";
+      var pa = lay.pos[a], pb = lay.pos[b];
+      var wa = lay.nw[a], wb = lay.nw[b];
+      var dx = pb.x - pa.x;
+      var dstr;
+      if (a === b) {
+        dstr = 'M ' + (pa.x - wa / 4) + ' ' + (pa.y - 13) +
+          ' C ' + (pa.x - wa / 2 - 10) + ' ' + (pa.y - 34) + ', ' + (pa.x + wa / 2 + 10) + ' ' + (pa.y - 34) +
+          ', ' + (pa.x + wa / 4) + ' ' + (pa.y - 13);
+      } else {
+        var up = lay.row[b] < lay.row[a];
+        var span = Math.abs(lay.row[a] - lay.row[b]);
+        var ss, es, spt, ept, c1, c2;
+        if (up && span > 1) {
+          // spanning return to the hub: outer lane on the side the source is on
+          var left = pa.x < lay.w / 2;
+          var laneX = left ? 18 : (lay.w - 18);
+          ss = es = left ? "left" : "right";
+          spt = anc(pa, wa, ss);
+          ept = anc(pb, wb, es);
+          c1 = { x: laneX, y: spt.y };
+          c2 = { x: laneX, y: ept.y };
+        } else {
+          if (!up) {
+            if (Math.abs(dx) < 24) { ss = "bottom"; es = "top"; }
+            else { var fd = dx > 0 ? 1 : -1; ss = fd > 0 ? "right" : "left"; es = fd > 0 ? "left" : "right"; }
+          } else if (span === 1 && Math.abs(dx) < 24) {
+            ss = "top"; es = "bottom";
+          } else {
+            var rd = dx !== 0 ? (dx > 0 ? 1 : -1) : ((retNo % 2) ? 1 : -1);
+            ss = rd > 0 ? "right" : "left";
+            es = rd > 0 ? "left" : "right";
+          }
+          retNo++;
+          spt = anc(pa, wa, ss);
+          ept = anc(pb, wb, es);
+          c1 = ctl(spt, ss, (ss === "top" || ss === "bottom") ? 26 : (wa / 2 + 26));
+          c2 = ctl(ept, es, (es === "top" || es === "bottom") ? 26 : (wb / 2 + 26));
+        }
+        dstr = 'M ' + spt.x.toFixed(1) + ' ' + spt.y.toFixed(1) +
+          ' C ' + c1.x.toFixed(1) + ' ' + c1.y.toFixed(1) + ', ' + c2.x.toFixed(1) + ' ' + c2.y.toFixed(1) +
+          ', ' + ept.x.toFixed(1) + ' ' + ept.y.toFixed(1);
+      }
+      svg += '<path class="' + cls + '" d="' + dstr + '" marker-end="url(#' + mark + ')"><title>' + title + '</title></path>';
+    });
+    states.forEach(function (s) {
+      var p0 = lay.pos[s];
+      var sh = stateHits[s] || 0;
+      var w2 = lay.nw[s], h2 = 26;
+      svg += '<g class="nd ' + (sh > 0 ? "ng" : "nr") + '">' +
+        '<rect x="' + (p0.x - w2 / 2).toFixed(1) + '" y="' + (p0.y - h2 / 2) + '" width="' + w2.toFixed(1) +
+        '" height="' + h2 + '" rx="6"/>' +
+        '<text x="' + p0.x.toFixed(1) + '" y="' + (p0.y + 4) + '" text-anchor="middle">' + esc(s) + '</text>' +
+        '<title>' + esc(s + " \u2014 " + sh + " hit(s) in fsm_state") + '</title></g>';
+    });
+    svg += '</svg>';
+    if (skipped > 0) {
+      svg += '<div class="fsmnote">' + skipped + ' uncovered transition path(s) are not drawn in the graph (see the table for missed transitions).</div>';
+    }
+    return svg;
+  }
+
+  function drawFsmGraph(sec, allPoints) {
+    var map = {};
+    allPoints.forEach(function (p) {
+      if (p.type === "fsm_arc" || p.type === "fsm_state") {
+        var c = fsmParts(p.comment);
+        if (!map[c.sig]) map[c.sig] = [];
+        map[c.sig].push(p);
+      }
+    });
+    var sigs = Object.keys(map).sort();
+    if (!sigs.length) {
+      sec.innerHTML += "<div class='empty'>No fsm points.</div>";
+      return;
+    }
+    sec.innerHTML += "<p class='hint'>" + sigs.length + " signal(s). Click a signal to show its state graph.</p>";
+    sigs.forEach(function (sg, i) {
+      var pts = map[sg];
+      var arcs = pts.filter(function (p) { return p.type === "fsm_arc"; });
+      var cov = arcs.filter(function (p) { return p.count > 0; }).length;
+      var row = document.createElement("div");
+      row.className = "fsmg-sig";
+      row.innerHTML = "<span class='twisty' data-fsg2='" + i + "'>\u25ba</span> <code class='net'>" + esc(sg) +
+        "</code> <span class='muted'>" + arcs.length + " transition(s): " + cov +
+        " covered, " + (arcs.length - cov) + " missed</span>";
+      sec.appendChild(row);
+      var det = document.createElement("div");
+      det.className = "fsmg-det";
+      det.style.display = "none";
+      det.setAttribute("data-fsd2", i);
+      det.innerHTML = "<div class='fsmgraphwrap'>" + (fsmSignalGraphSvg(pts) || "<div class='empty'>No transitions.</div>") + "</div>";
+      sec.appendChild(det);
+    });
+    sec.addEventListener("click", function (e) {
+      var tw = e.target.closest("[data-fsg2]");
+      if (!tw) return;
+      var gi = tw.getAttribute("data-fsg2");
+      var det = sec.querySelector("[data-fsd2='" + gi + "']");
+      var open = det.style.display !== "none";
+      det.style.display = open ? "none" : "";
+      tw.textContent = open ? "\u25ba" : "\u25bc";
+    });
+  }
+
   function renderTypeDetail(kind, i, type) {
     var r = kind === "inst" ? instRows[i] : duRows[i];
     app.innerHTML = "";
@@ -1152,10 +1436,23 @@ JS = r"""
     if (type === "fsm_state" || type === "fsm_arc") {
       var fsec = document.createElement("section");
       fsec.innerHTML = "<h2>" + (type === "fsm_arc" ? "FSM arc" : "FSM state") + " coverage</h2>";
+      if (type === "fsm_arc") fsec.appendChild(fsmViewBtns());
       app.appendChild(fsec);
-      drawFsmGroups(fsec, rows, type);
+      if (type === "fsm_arc" && fsmArcView === "graph") {
+        drawFsmGraph(fsec, r.points);
+      } else {
+        drawFsmGroups(fsec, rows, type);
+      }
+      fsec.addEventListener("click", function (e) {
+        var b = e.target.closest("[data-fview]");
+        if (b) {
+          fsmArcView = b.getAttribute("data-fview");
+          renderTypeDetail(kind, i, type);
+        }
+      });
       return;
-    }    if (!sortState[type]) sortState[type] = { key: "line", dir: "asc" };
+    }
+    if (!sortState[type]) sortState[type] = { key: "line", dir: "asc" };
     var sec = document.createElement("section");
     sec.innerHTML = "<h2>" + esc(type) + " coverage (" + rows.length + " points)</h2>";
     var st = sortState[type];
