@@ -32,6 +32,7 @@ body {
 #app { max-width: 1200px; margin: 0 auto; padding: 24px 20px 60px; }
 header { border-bottom: 2px solid var(--line); margin-bottom: 18px; padding-bottom: 12px; }
 h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
+h1.center { text-align: center; }
 .src { color: var(--muted); font-size: 13px; }
 .src a { color: var(--accent); text-decoration: none; word-break: break-all; }
 .file { color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; margin-bottom: 6px; }

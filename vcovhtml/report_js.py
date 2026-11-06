@@ -69,10 +69,11 @@ JS = r"""
   }
   function funcScore(f) { return f ? f.score : null; }
 
-  function header(title, srcHtml) {
+  function header(title, srcHtml, center) {
     var h = document.createElement("header");
     var t = document.createElement("h1");
     t.textContent = title;
+    if (center) t.className = "center";
     h.appendChild(t);
     if (srcHtml) {
       var s = document.createElement("div");
@@ -344,7 +345,7 @@ JS = r"""
   var instSec, duSec;
   function render() {
     app.innerHTML = "";
-    app.appendChild(header(DATA.title, DATA.srcHtml));
+    app.appendChild(header(DATA.title, DATA.srcHtml, true));
     app.appendChild(summaryCards());
     app.appendChild(controls());
     instSec = buildInstanceTree();

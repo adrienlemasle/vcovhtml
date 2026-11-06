@@ -238,6 +238,7 @@ def build_data(points, source: str, root: str = None) -> dict:
     return {
         "version": __version__,
         "source": source,
+        "title": "Coverage Report",
         "codeTypes": ordered_sorted,
         "duRows": du_rows,
         "byDesignUnit": bool(du_rows),
