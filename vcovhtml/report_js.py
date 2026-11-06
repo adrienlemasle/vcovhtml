@@ -435,10 +435,11 @@ JS = r"""
           label: it.name,
           weight: it.weight,
           totalBins: it.bins.length,
-          hitBins: it.bins.filter(function (b) { return b.covered; }).length,
+          hitBins: it.bins.filter(function (b) { return !b.binType && b.covered; }).length,
           score: it.score,
           bins: it.bins.map(function (b) {
-            return { label: b.name, count: b.count, atLeast: b.atLeast || 1, covered: b.covered };
+            return { label: b.name, count: b.count, atLeast: b.atLeast || 1,
+                     covered: b.covered, binType: b.binType || "" };
           })
         };
       });
@@ -465,8 +466,17 @@ JS = r"""
     return "<table class='pts sub'><thead><tr>" +
       "<th>Bin</th><th class='num'>Hits</th><th class='num'>Goal</th><th>Status</th></tr></thead><tbody>" +
       c.bins.map(function (b) {
-        return "<tr><td>" + esc(shortName(b.label)) + "</td><td class='num'>" + b.count +
-          "</td><td class='num'>" + (b.atLeast > 1 ? b.atLeast : "") + "</td>" +
+        var nm = esc(shortName(b.label));
+        var goal = b.atLeast > 1 ? b.atLeast : "";
+        if (b.binType) {
+          var ih = b.count > 0;
+          var st = b.binType === "illegal" ? (ih ? "illegal hit" : "not hit") : b.binType;
+          return "<tr class='bin-" + b.binType + "'><td>" + nm + "</td>" +
+            "<td class='num'>" + b.count + "</td><td class='num'>" + goal + "</td>" +
+            "<td class='st " + (ih ? "r" : "g") + "'>" + st + "</td></tr>";
+        }
+        return "<tr><td>" + nm + "</td><td class='num'>" + b.count +
+          "</td><td class='num'>" + goal + "</td>" +
           "<td class='st " + (b.covered ? "g" : "r") + "'>" + (b.covered ? "covered" : "missed") + "</td></tr>";
       }).join("") + "</tbody></table>";
   }

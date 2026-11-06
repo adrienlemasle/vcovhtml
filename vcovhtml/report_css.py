@@ -85,6 +85,7 @@ td.file { color: var(--muted); font-size: 12px; font-family: ui-monospace, SFMon
 .st.g { color: var(--green); font-weight: 600; }
 .st.o { color: var(--orange); font-weight: 600; }
 .st.r { color: var(--red); font-weight: 600; }
+tr.bin-illegal td { background: #fff1f0; }
 .pnum.g { color: var(--green); }
 .pnum.o { color: var(--orange); }
 .pnum.r { color: var(--red); }

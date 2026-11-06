@@ -175,9 +175,29 @@ class TestCovergroupTally(unittest.TestCase):
         groups = build_covergroups(pts)
         g = list(groups.values())[0]
         item = g.items["m.cg.cp"]
-        # illegal bin has Bt -> excluded; only 'a' counts: 1/1 = 100%
-        self.assertEqual(len(item.bins), 1)
-        self.assertAlmostEqual(cg_item_tally(item)["score"], 100.0)
+        # both bins kept; only 'a' counts toward the score: 1/1 = 100%
+        self.assertEqual(len(item.bins), 2)
+        it = cg_item_tally(item)
+        self.assertEqual((it["hit"], it["total"]), (1, 1))
+        self.assertAlmostEqual(it["score"], 100.0)
+        # the illegal bin was hit -> reported
+        self.assertEqual(it["illegalHit"], 1)
+        bad = [b for b in item.bins.values() if b.name == "i"][0]
+        self.assertEqual(bad.binType, "illegal")
+
+    def test_illegal_not_hit(self):
+        pts = [
+            self._pt("a", 1, 1),
+            self._pt("i", 0, 1, Bt="illegal"),
+        ]
+        groups = build_covergroups(pts)
+        g = list(groups.values())[0]
+        item = g.items["m.cg.cp"]
+        it = cg_item_tally(item)
+        self.assertEqual(it["illegalHit"], 0)
+        # group score unaffected by the illegal bin
+        self.assertAlmostEqual(cg_group_tally(g)["score"], 100.0)
+
 
 
 class TestDataAndHtml(unittest.TestCase):

@@ -71,6 +71,7 @@ def _cg_item_json(item) -> dict:
         "count": b.count,
         "atLeast": b.atLeast,
         "covered": b.covered(),
+        "binType": b.binType,
     } for b in item.bins.values()]
     return {
         "name": item.name,
@@ -78,6 +79,7 @@ def _cg_item_json(item) -> dict:
         "hit": i["hit"],
         "total": i["total"],
         "score": i["score"],
+        "illegalHit": i["illegalHit"],
         "bins": bins,
     }
 

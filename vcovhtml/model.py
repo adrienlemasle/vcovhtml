@@ -348,11 +348,13 @@ class CgBin:
         self.name = ""
         self.count = 0
         self.atLeast = 1
+        self.binType = ""
 
-    def add(self, name: str, count: int, atLeast: int) -> None:
+    def add(self, name: str, count: int, atLeast: int, binType: str = "") -> None:
         self.name = name
         self.count += count
         self.atLeast = max(self.atLeast, atLeast)
+        self.binType = binType
 
     def covered(self) -> bool:
         return self.count >= self.atLeast
@@ -414,10 +416,9 @@ def build_covergroups(points) -> "OrderedDict[str, CgGroup]":
         group.add_record(cgname, key_number(fields.get("Gw")))
         item = group.new_item(itemHier)
         item.add_weight(key_number(fields.get("w")))
-        if fields.get("Bt"):
-            continue  # Not coverable
         item.new_bin(bin_identity(pt.name)).add(bin_, pt.count,
-                                                 key_number(fields.get("s")))
+                                                 key_number(fields.get("s")),
+                                                 fields.get("Bt", ""))
     return groups
 
 
@@ -438,10 +439,14 @@ def covergroups_by_module(groups) -> "dict[str, list[CgGroup]]":
 
 
 def cg_item_tally(item: CgItem) -> dict:
-    hit = sum(1 for b in item.bins.values() if b.covered())
-    total = len(item.bins)
+    coverable = [b for b in item.bins.values() if not b.binType]
+    hit = sum(1 for b in coverable if b.covered())
+    total = len(coverable)
     score = (hit / total * 100.0) if total else (0.0 if item.weight else 100.0)
-    return {"hit": hit, "total": total, "score": score}
+    illegalHit = sum(1 for b in item.bins.values()
+                     if b.binType and b.count > 0)
+    return {"hit": hit, "total": total, "score": score,
+            "illegalHit": illegalHit}
 
 
 def cg_group_tally(group: CgGroup) -> dict:
