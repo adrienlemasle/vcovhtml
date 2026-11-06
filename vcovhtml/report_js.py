@@ -983,6 +983,139 @@ JS = r"""
     });
   }
 
+  // fsm: the comment is "<fullpath>.<signal>::<detail>" -- the signal is the
+  // last dot-segment of the path; the detail is a state (fsm_state) or a
+  // from->to transition (fsm_arc). We fold each signal's records together and
+  // list its states / transitions when expanded, using the same layout as the
+  // toggle and expression pages.
+  function fsmParts(o) {
+    var ci = o.indexOf("::");
+    if (ci < 0) return { sig: o, detail: "" };
+    var left = o.slice(0, ci);
+    var detail = o.slice(ci + 2);
+    var di = left.lastIndexOf(".");
+    var sig = di >= 0 ? left.slice(di + 1) : left;
+    return { sig: sig, detail: detail };
+  }
+  function groupFsm(points, type) {
+    var map = {};
+    points.forEach(function (p) {
+      var c = fsmParts(p.comment || "");
+      var key = (p.file || "") + "#" + p.line + "#" + (p.h || "") + "#" + c.sig;
+      var g = map[key];
+      if (!g) {
+        g = { id: 0, file: p.file || "", line: p.line || 0, h: p.h || "",
+              sig: c.sig, type: type, total: 0, hit: 0, items: [] };
+        map[key] = g;
+      }
+      g.total++;
+      if (p.count > 0) g.hit++;
+      g.items.push({ detail: c.detail, rec: p });
+    });
+    var out = [];
+    var idx = 0;
+    Object.keys(map).forEach(function (k) {
+      map[k].id = idx++;
+      out.push(map[k]);
+    });
+    return out;
+  }
+  var fsmSort = {};
+  function fsmArrow(type, key) {
+    var s = fsmSort[type];
+    return s && s.key === key ? (s.dir === "asc" ? " \u25b2" : " \u25bc") : "";
+  }
+  // detail sub-table: one row per state (fsm_state) or transition (fsm_arc)
+  function fsmDetailTableHtml(g) {
+    var head = g.type === "fsm_arc" ? "Transition" : "State";
+    return "<table class='pts sub'><thead><tr>" +
+      "<th>" + head + "</th><th class='num'>Hits</th><th>Status</th></tr></thead><tbody>" +
+      g.items.map(function (x) {
+        var hit = x.rec.count > 0;
+        return "<tr><td>" + esc(x.detail) + "</td><td class='num'>" + x.rec.count +
+          "</td><td class='st " + (hit ? "g" : "r") + "'>" + (hit ? "covered" : "missed") + "</td></tr>";
+      }).join("") + "</tbody></table>";
+  }
+  function drawFsmBody(sec, groups) {
+    var type = groups[0].type;
+    sec.querySelectorAll("[data-fsmsort]").forEach(function (th) {
+      var k = th.getAttribute("data-fsmsort");
+      th.innerHTML = (k === "line" ? "Line" : "Score") + fsmArrow(type, k);
+    });
+    var body = sec.querySelector("table.pts tbody");
+    body.innerHTML = "";
+    var s = fsmSort[type];
+    var sorted = groups.slice().sort(function (a, b) {
+      var d = (s.dir === "asc") ? 1 : -1;
+      if (s.key === "score") {
+        var sa = a.total ? 100 * a.hit / a.total : 0, sb = b.total ? 100 * b.hit / b.total : 0;
+        if (sa !== sb) return (sb - sa) * d;
+        return (a.line - b.line) * d;
+      }
+      if (a.line !== b.line) return (a.line - b.line) * d;
+      return a.sig.localeCompare(b.sig);
+    });
+    sorted.forEach(function (g) {
+      var sc = g.total ? 100 * g.hit / g.total : null;
+      var row = document.createElement("tr");
+      var sidx = srcIdx(g.file);
+      row.innerHTML = "<td class='num'>" + (sidx >= 0 ? "<a class='line-link' href='#file/" + sidx + "/" + g.line + "'>" + g.line + "</a>" : g.line) + "</td>" +
+        "<td class='name' style='padding-left:8px'><span class='twisty' data-fsg='" + g.id + "'>\u25ba</span> <code class='net'>" +
+        esc(g.sig) + "</code></td>" +
+        "<td class='num'>" + g.total + "</td>" +
+        "<td class='num'>" + g.hit + "</td>" +
+        "<td class='pcell'>" + cell(sc) + "</td>";
+      body.appendChild(row);
+      var det = document.createElement("tr");
+      det.className = "tog-detail";
+      det.style.display = "none";
+      det.setAttribute("data-fsd", g.id);
+      det.innerHTML = "<td colspan='5' class='tog-sub'>" + fsmDetailTableHtml(g) + "</td>";
+      body.appendChild(det);
+    });
+  }
+  function drawFsmGroups(sec, points, type) {
+    if (!fsmSort[type]) fsmSort[type] = { key: "line", dir: "asc" };
+    var groups = groupFsm(points, type);
+    if (!groups.length) {
+      sec.innerHTML += "<div class='empty'>No " + type + " points.</div>";
+      return;
+    }
+    var colName = type === "fsm_arc" ? "transitions" : "states";
+    sec.innerHTML += "<p class='hint'>" + groups.length + " signal(s), " + points.length +
+      " " + colName + ". Click the Line or Score header to sort; click a signal to see its " + colName + ".</p>";
+    var tbl = document.createElement("table");
+    tbl.className = "pts";
+    var thName = type === "fsm_arc" ? "Transitions" : "States";
+    tbl.innerHTML = "<thead><tr>" +
+      "<th class='sortable' data-fsmsort='line'>Line</th>" +
+      "<th>Signal</th>" +
+      "<th class='num'>" + thName + "</th>" +
+      "<th class='num'>" + thName + " covered</th>" +
+      "<th class='sortable' data-fsmsort='score'>Score</th>" +
+      "</tr></thead><tbody></tbody>";
+    sec.appendChild(tbl);
+    drawFsmBody(sec, groups);
+    sec.addEventListener("click", function (e) {
+      var th = e.target.closest("[data-fsmsort]");
+      var tw = e.target.closest("[data-fsg]");
+      if (th) {
+        var key = th.getAttribute("data-fsmsort");
+        if (fsmSort[type].key === key) fsmSort[type].dir = (fsmSort[type].dir === "asc") ? "desc" : "asc";
+        else { fsmSort[type].key = key; fsmSort[type].dir = (key === "score") ? "desc" : "asc"; }
+        drawFsmBody(sec, groups);
+        return;
+      }
+      if (tw) {
+        var gi = tw.getAttribute("data-fsg");
+        var det = sec.querySelector("[data-fsd='" + gi + "']");
+        var open = det.style.display !== "none";
+        det.style.display = open ? "none" : "";
+        tw.textContent = open ? "\u25ba" : "\u25bc";
+      }
+    });
+  }
+
   function renderTypeDetail(kind, i, type) {
     var r = kind === "inst" ? instRows[i] : duRows[i];
     app.innerHTML = "";
@@ -1016,7 +1149,13 @@ JS = r"""
       drawTogGroups(tsec, rows);
       return;
     }
-    if (!sortState[type]) sortState[type] = { key: "line", dir: "asc" };
+    if (type === "fsm_state" || type === "fsm_arc") {
+      var fsec = document.createElement("section");
+      fsec.innerHTML = "<h2>" + (type === "fsm_arc" ? "FSM arc" : "FSM state") + " coverage</h2>";
+      app.appendChild(fsec);
+      drawFsmGroups(fsec, rows, type);
+      return;
+    }    if (!sortState[type]) sortState[type] = { key: "line", dir: "asc" };
     var sec = document.createElement("section");
     sec.innerHTML = "<h2>" + esc(type) + " coverage (" + rows.length + " points)</h2>";
     var st = sortState[type];
