@@ -824,11 +824,10 @@ JS = r"""
   function groupExpr(points) {
     var map = {};
     points.forEach(function (p) {
-      // group on the condition (the comment minus its " => result"),
-      // so all generate-for iterations of one expression collapse
-      // under a single row
-      var cond = (p.comment || "").split(" => ")[0];
-      var key = (p.file || "") + "#" + p.line + "#" + cond;
+      // group on file+line+h, the original key: different
+      // expressions on the same line/instance stay in one group, and each
+      // generate-for iteration (a distinct decoded h) forms its own
+      var key = (p.file || "") + "#" + p.line + "#" + (p.h || "");
       (map[key] = map[key] || []).push(p);
     });
     var out = [];
