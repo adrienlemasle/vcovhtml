@@ -627,12 +627,15 @@ JS = r"""
       }
     });
   }
+  // The instance suffix that identifies a record: the trailing [n] (or
+  // the * of a combined instance) for a single-level h, and the whole
+  // decoded begin path when it nests (several generate-for levels).
   function iterOf(pt) {
     if (!pt.h) return "";
     var parts = pt.h.split(".");
-    var last = parts[parts.length - 1];
-    var m = last.match(/\[(\*|\d+)\]/);
-    return m ? m[1] : "";
+    if (parts.length > 1) return pt.h;
+    var m = parts[0].match(/\[(\*|\d+)\]/);
+    return m ? "[" + m[1] + "]" : "";
   }
   function srcCell(p) {
     var t = srcLine(p.file, p.line);
@@ -661,7 +664,7 @@ JS = r"""
       var tr = document.createElement("tr");
       var it = iterOf(p);
       var li = srcIdx(p.file);
-      tr.innerHTML = "<td class='count'>" + (li >= 0 ? "<a class='line-link' href='#file/" + li + "/" + p.line + "'>" + p.line + "</a>" : p.line) + (it ? ' <span class="iter">[' + it + ']</span>' : "") + "</td>" +
+      tr.innerHTML = "<td class='count'>" + (li >= 0 ? "<a class='line-link' href='#file/" + li + "/" + p.line + "'>" + p.line + "</a>" : p.line) + (it ? ' <span class="iter">' + esc(it) + "</span>" : "") + "</td>" +
         "<td class='comment'>" + esc(p.comment || "") + "</td>" +
         "<td class='code-line'>" + srcCell(p) + "</td>" +
         "<td class='st " + (p.covered ? "g" : "r") + "'>" + (p.covered ? "covered" : "missed") + "</td>" +
@@ -748,8 +751,9 @@ JS = r"""
       var sc = g.total ? 100 * g.hit / g.total : null;
       var row = document.createElement("tr");
       var eidx = srcIdx(g.file);
+      var eiter = iterOf(g.combos[0]);
       row.innerHTML = "<td class='num'>" + (eidx >= 0 ? "<a class='line-link' href='#file/" + eidx + "/" + g.line + "'>" + g.line + "</a>" : g.line) + "</td>" +
-        "<td class='name' style='padding-left:8px'><span class='twisty' data-eg='" + g.id + "'>\u25ba</span> <code class='expr'>" +
+        "<td class='name' style='padding-left:8px'><span class='twisty' data-eg='" + g.id + "'>\u25ba</span>" + (eiter ? ' <span class="iter">' + esc(eiter) + "</span>" : "") + " <code class='expr'>" +
         esc(g.label) + "</code></td>" +
         "<td class='num'>" + g.total + "</td>" +
         "<td class='num'>" + g.hit + "</td>" +
@@ -903,8 +907,9 @@ JS = r"""
       var sc = s.totalBits ? 100 * s.hitBits / s.totalBits : null;
       var row = document.createElement("tr");
       var sidx = srcIdx(s.file);
+      var sit = iterOf(s);
       row.innerHTML = "<td class='num'>" + (sidx >= 0 ? "<a class='line-link' href='#file/" + sidx + "/" + s.line + "'>" + s.line + "</a>" : s.line) + "</td>" +
-        "<td class='name' style='padding-left:8px'><span class='twisty' data-tg='" + s.id + "'>\u25ba</span> <code class='net'>" +
+        "<td class='name' style='padding-left:8px'><span class='twisty' data-tg='" + s.id + "'>\u25ba</span>" + (sit ? ' <span class="iter">' + esc(sit) + "</span>" : "") + " <code class='net'>" +
         esc(s.base) + "</code></td>" +
         "<td class='num'>" + s.totalBits + "</td>" +
         "<td class='num'>" + s.hitBits + "</td>" +
@@ -1060,8 +1065,9 @@ JS = r"""
       var sc = g.total ? 100 * g.hit / g.total : null;
       var row = document.createElement("tr");
       var sidx = srcIdx(g.file);
+      var fit = iterOf(g);
       row.innerHTML = "<td class='num'>" + (sidx >= 0 ? "<a class='line-link' href='#file/" + sidx + "/" + g.line + "'>" + g.line + "</a>" : g.line) + "</td>" +
-        "<td class='name' style='padding-left:8px'><span class='twisty' data-fsg='" + g.id + "'>\u25ba</span> <code class='net'>" +
+        "<td class='name' style='padding-left:8px'><span class='twisty' data-fsg='" + g.id + "'>\u25ba</span>" + (fit ? ' <span class="iter">' + esc(fit) + "</span>" : "") + " <code class='net'>" +
         esc(g.sig) + "</code></td>" +
         "<td class='num'>" + g.total + "</td>" +
         "<td class='num'>" + g.hit + "</td>" +
@@ -1209,7 +1215,7 @@ JS = r"""
   // outer lanes that return (back) edges travel in, so a dense hub can have
   // several parallel return lanes without any of them touching a box.
   function fsmRowPos(byLayer, initState, upCount) {
-    var vgap = 54, hgap = 40, nh = 26;
+    var vgap = 54, hgap = 40, nh = 32;
     var nw = {};
     byLayer.forEach(function (layer) {
       layer.forEach(function (s) { nw[s] = s.length * 7.4 + 22; });
@@ -1314,17 +1320,20 @@ JS = r"""
       return !(sp === 1 && Math.abs(lay.pos[e.b].x - lay.pos[e.a].x) < 24);
     });
     if (longList.length !== drawn.length) lay = fsmRowPos(lay2.byLayer, initState, longList.length);
-    // Returns (back edges) travel in right-angle corridors: a horizontal
-    // stub out of the source side, a vertical run, a horizontal stub into
-    // the target side. Each run is placed outside the widest box of every
-    // row it spans, so it can never cross a box; parallel returns get
-    // nested corridors. The side is the one with fewer same-row boxes
-    // between the source and the corridor (ties alternate, so returns to a
-    // dense hub fan out symmetrically). When several edges leave or enter
-    // the same box, their anchors are spread along the box side so
-    // arrowheads never stack on one spot.
-    var laneMap = {}, corr = { left: 0, right: 0 };
-    var sc = {}, ec = {}, sUsed = {}, eUsed = {}, laneNo = { left: 0, right: 0 };
+    // Long edges (returns and skips) travel in right-angle
+    // corridors, one per side-lane, nested 14px apart and placed
+    // outside the widest box of every row they span, so they never
+    // cross a box. The side is the flow direction for downward
+    // edges, the clearer side for returns into a dense row, and
+    // otherwise it fills one side up to 3 arrows (which fit 10px
+    // apart on a 26px box) before moving to the other, so no
+    // arrowheads ever merge into one blob. When several edges
+    // leave or enter the same box side, their anchors are centered
+    // and spread along the side (pass B, once the final counts
+    // are known).
+    var laneMap = {};
+    var sCount = {}, eCount = {}, laneNo = { left: 0, right: 0 };
+    var sides = {};
     longList.forEach(function (e) {
       var lo = Math.min(lay.row[e.a], lay.row[e.b]);
       var hi = Math.max(lay.row[e.a], lay.row[e.b]);
@@ -1339,40 +1348,50 @@ JS = r"""
       lay.rows[lay.row[e.a]].forEach(function (s) {
         if (s !== e.a && (lay.pos[s].x > lay.pos[e.a].x ? rightBoxes++ : leftBoxes++));
       });
+      var tRight = 0, tLeft = 0;
+      lay.rows[lay.row[e.b]].forEach(function (s2) {
+        if (s2 !== e.b && (lay.pos[s2].x > lay.pos[e.b].x ? tRight++ : tLeft++));
+      });
       var upEdge = lay.row[e.b] < lay.row[e.a];
       var edx = lay.pos[e.b].x - lay.pos[e.a].x;
       var side;
       if (!upEdge && edx !== 0) side = edx > 0 ? "right" : "left";
       else if (rightBoxes !== leftBoxes) side = rightBoxes < leftBoxes ? "right" : "left";
-      else side = (laneNo.left + laneNo.right) % 2 ? "right" : "left";
-      var sk = e.a + "|" + side;
-      sc[sk] = (sc[sk] || 0) + 1;
-      ec[e.b] = (ec[e.b] || 0) + 1;
-      var si = (sUsed[sk] = (sUsed[sk] || 0) + 1) - 1;
-      var ei = (eUsed[e.b] = (eUsed[e.b] || 0) + 1) - 1;
-      var soff = Math.max(-8, Math.min(8, (si - (sc[sk] - 1) / 2) * 8));
-      var eoff = Math.max(-8, Math.min(8, (ei - (ec[e.b] - 1) / 2) * 8));
-      var laneX = side === "right"
-        ? maxR + 14 + 14 * laneNo.right
-        : minL - 14 - 14 * laneNo.left;
-      if (side === "right") { corr.right = Math.max(corr.right, laneX); laneNo.right++; }
-      else { corr.left = Math.min(corr.left, laneX); laneNo.left++; }
-      var tRight = 0, tLeft = 0;
-      lay.rows[lay.row[e.b]].forEach(function (s2) {
-        if (s2 !== e.b && (lay.pos[s2].x > lay.pos[e.b].x ? tRight++ : tLeft++));
-      });
+      else { var tl = eCount[e.b + "|left"] || 0;
+        side = tl < 3 ? "left" : (eCount[e.b + "|right"] || 0) < 3 ? "right" : tl <= (eCount[e.b + "|right"] || 0) ? "left" : "right"; }
+      var laneIdx = side === "right" ? laneNo.right : laneNo.left;
+      if (side === "right") laneNo.right++; else laneNo.left++;
+      sides[e.a + "->" + e.b] = { side: side, maxR: maxR, minL: minL, laneIdx: laneIdx,
+        rightBoxes: rightBoxes, leftBoxes: leftBoxes, tRight: tRight, tLeft: tLeft };
+      sCount[e.a + "|" + side] = (sCount[e.a + "|" + side] || 0) + 1;
+      eCount[e.b + "|" + side] = (eCount[e.b + "|" + side] || 0) + 1;
+    });
+    var sPos = {}, ePos = {};
+    longList.forEach(function (e) {
+      var info = sides[e.a + "->" + e.b];
+      var sKey = e.a + "|" + info.side, eKey = e.b + "|" + info.side;
+      var si = sPos[sKey] || 0; sPos[sKey] = si + 1;
+      var ei = ePos[eKey] || 0; ePos[eKey] = ei + 1;
+      var nS = sCount[sKey], nE = eCount[eKey];
+      var spS = nS > 1 ? Math.min(10, 22 / (nS - 1)) : 0;
+      var spE = nE > 1 ? Math.min(10, 22 / (nE - 1)) : 0;
+      info.soff = Math.max(-11, Math.min(11, (si - (nS - 1) / 2) * spS));
+      info.eoff = Math.max(-11, Math.min(11, (ei - (nE - 1) / 2) * spE));
+      info.laneX = info.side === "right"
+        ? info.maxR + 14 + 14 * info.laneIdx
+        : info.minL - 14 - 14 * info.laneIdx;
       // a head-on run at the anchor's y is only crossing-free if
       // no sibling box on that row sits between the box and the lane
-      laneMap[e.a + "->" + e.b] = { side: side, laneX: laneX, soff: soff, eoff: eoff,
-        sClear: (side === "left" ? leftBoxes : rightBoxes) === 0,
-        eClear: (side === "left" ? tLeft : tRight) === 0 };
+      info.sClear = (info.side === "left" ? info.leftBoxes : info.rightBoxes) === 0;
+      info.eClear = (info.side === "left" ? info.tLeft : info.tRight) === 0;
+      laneMap[e.a + "->" + e.b] = info;
     });
     var skipped = 0;
     var svg = '<svg class="fsmgraph" viewBox="0 0 ' + lay.w + ' ' + lay.h +
       '" width="' + lay.w + '" height="' + lay.h + '"><defs>' +
       '<marker id="arrg" markerWidth="9" markerHeight="9" refX="8" refY="3.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,3.5 L0,7 Z" fill="#1a7f37"/></marker>' +
       '</defs>';
-    var ah = 13;
+    var ah = 16;
     function anc(pt, w, side) {
       if (side === "top") return { x: pt.x, y: pt.y - ah };
       if (side === "bottom") return { x: pt.x, y: pt.y + ah };
@@ -1399,9 +1418,9 @@ JS = r"""
       var dx = pb.x - pa.x;
       var dstr;
       if (a === b) {
-        dstr = 'M ' + (pa.x - wa / 4) + ' ' + (pa.y - 13) +
-          ' C ' + (pa.x - wa / 2 - 10) + ' ' + (pa.y - 34) + ', ' + (pa.x + wa / 2 + 10) + ' ' + (pa.y - 34) +
-          ', ' + (pa.x + wa / 4) + ' ' + (pa.y - 13);
+        dstr = 'M ' + (pa.x - wa / 4) + ' ' + (pa.y - 16) +
+          ' C ' + (pa.x - wa / 2 - 10) + ' ' + (pa.y - 38) + ', ' + (pa.x + wa / 2 + 10) + ' ' + (pa.y - 38) +
+          ', ' + (pa.x + wa / 4) + ' ' + (pa.y - 16);
       } else {
         var span = Math.abs(lay.row[a] - lay.row[b]);
         if (span === 1 && Math.abs(dx) < 24) {
@@ -1451,7 +1470,7 @@ JS = r"""
     states.forEach(function (s) {
       var p0 = lay.pos[s];
       var sh = stateHits[s] || 0;
-      var w2 = lay.nw[s], h2 = 26;
+      var w2 = lay.nw[s], h2 = 32;
       svg += '<g class="nd ' + (sh > 0 ? "ng" : "nr") + '">' +
         '<rect x="' + (p0.x - w2 / 2).toFixed(1) + '" y="' + (p0.y - h2 / 2) + '" width="' + w2.toFixed(1) +
         '" height="' + h2 + '" rx="6"/>' +

@@ -19,6 +19,7 @@ from .model import (
     is_internal_point,
     merge_parametrized_points,
     module_base,
+    unescape_hier,
 )
 from .report_css import CSS
 from .report_js import JS
@@ -28,7 +29,10 @@ _CANON = ["line", "branch", "expr", "toggle", "fsm_state", "fsm_arc"]
 
 
 def _point_json(p: Point) -> dict:
-    hseg = p.h.split(".")[-1] if p.h else ""
+    # The last dot-segment of the raw h is the whole begin path (its inner
+    # dots are written as __DOT__), so it distinguishes every generate-for
+    # iteration; decode it for display.
+    hseg = unescape_hier(p.h.split(".")[-1]) if p.h else ""
     return {
         "t": p.t,
         "f": p.f,

@@ -9,6 +9,7 @@ from vcovhtml.covdat import unescape, parse_dat
 from vcovhtml.model import (
     splitHier,
     is_collapsed_hier,
+    unescape_hier,
     build_code_tree,
     code_tallies,
     merge_parametrized_points,
@@ -72,6 +73,36 @@ class TestCollapsed(unittest.TestCase):
         self.assertFalse(is_collapsed_hier("tb.dut.u_a"))
 
 
+class TestUnescapeHier(unittest.TestCase):
+    def test_plain_unchanged(self):
+        # no markers at all, or only an unrelated __-suffix
+        self.assertEqual(unescape_hier("dut"), "dut")
+        self.assertEqual(unescape_hier("some_unit__Pxyz"),
+                         "some_unit__Pxyz")
+
+    def test_dot_marker(self):
+        # nested named begins (old dumps already carry these)
+        self.assertEqual(
+            unescape_hier("g_alpha__DOT__b_trans"),
+            "g_alpha.b_trans",
+        )
+
+    def test_bra_ket_markers(self):
+        # a generate-for iteration index
+        self.assertEqual(
+            unescape_hier("g_net_position_local_token_num__BRA__0__KET__"),
+            "g_net_position_local_token_num[0]",
+        )
+
+    def test_nested_generate_for(self):
+        h = ("g_net_position_local_token_num__BRA__0__KET____DOT__"
+             "g_net_position_option_type__BRA__1__KET__")
+        self.assertEqual(
+            unescape_hier(h),
+            "g_net_position_local_token_num[0].g_net_position_option_type[1]",
+        )
+
+
 class TestParse(unittest.TestCase):
     def test_quote_in_param(self):
         fields = (
@@ -127,6 +158,30 @@ class TestCodeTree(unittest.TestCase):
         self.assertEqual(an.tally["line"], (2, 3))
         self.assertEqual(an.children["b"].tally["line"], (1, 2))
         self.assertEqual(an.children["c"].tally["line"], (1, 1))
+
+    def test_generate_for_iterations(self):
+        from vcovhtml.covdat import Point
+        pts = [
+            Point(name="\x01t\x02line\x01h\x02a.b.g__BRA__0__KET____DOT__h__BRA__1__KET__",
+                  count=1, t="line",
+                  h="a.b.g__BRA__0__KET____DOT__h__BRA__1__KET__", s=1),
+            Point(name="\x01t\x02line\x01h\x02a.b.g__BRA__0__KET____DOT__h__BRA__2__KET__",
+                  count=0, t="line",
+                  h="a.b.g__BRA__0__KET____DOT__h__BRA__2__KET__", s=1),
+            Point(name="\x01t\x02line\x01h\x02a.b.g__BRA__1__KET____DOT__h__BRA__1__KET__",
+                  count=2, t="line",
+                  h="a.b.g__BRA__1__KET____DOT__h__BRA__1__KET__", s=1),
+        ]
+        root, ordered = build_code_tree(pts)
+        code_tallies(root)
+        # the begin levels become real tree levels with decoded names
+        bn = root.children["a"].children["b"]
+        self.assertEqual(list(bn.children), ["g[0]", "g[1]"])
+        self.assertEqual(list(bn.children["g[0]"].children), ["h[1]", "h[2]"])
+        self.assertEqual(bn.children["g[1]"].children["h[1]"].points, [pts[2]])
+        # tallies roll up through the generated levels
+        self.assertEqual(bn.tally["line"], (2, 3))
+        self.assertEqual(bn.children["g[0]"].tally["line"], (1, 2))
 
 
 class TestCovergroupTally(unittest.TestCase):
@@ -219,6 +274,37 @@ class TestDataAndHtml(unittest.TestCase):
         parsed = json.loads(html[i + 1:j])
         self.assertEqual(parsed["nPoints"], 2)
         self.assertEqual(len(parsed["rows"]), 3)  # root, a, a.b
+
+    def test_du_view_distinguishes_generate_for(self):
+        from vcovhtml.covdat import Point
+        pts = [
+            Point(name="\x01t\x02line\x01page\x02v_line/m\x01f\x02x.v\x01l\x0210\x01o\x02block"
+                      "\x01h\x02tb.dut.g__BRA__0__KET____DOT__h__BRA__1__KET__",
+                  count=1, t="line", page="v_line/m", f="x.v", l=10, o="block",
+                  h="tb.dut.g__BRA__0__KET____DOT__h__BRA__1__KET__", s=1),
+            Point(name="\x01t\x02line\x01page\x02v_line/m\x01f\x02x.v\x01l\x0210\x01o\x02block"
+                      "\x01h\x02tb.dut.g__BRA__0__KET____DOT__h__BRA__2__KET__",
+                  count=0, t="line", page="v_line/m", f="x.v", l=10, o="block",
+                  h="tb.dut.g__BRA__0__KET____DOT__h__BRA__2__KET__", s=1),
+            Point(name="\x01t\x02line\x01page\x02v_line/m\x01f\x02x.v\x01l\x0210\x01o\x02block"
+                      "\x01h\x02tb.dut.g__BRA__1__KET____DOT__h__BRA__1__KET__",
+                  count=2, t="line", page="v_line/m", f="x.v", l=10, o="block",
+                  h="tb.dut.g__BRA__1__KET____DOT__h__BRA__1__KET__", s=1),
+            Point(name="\x01t\x02line\x01page\x02v_line/m\x01f\x02x.v\x01l\x0211\x01o\x02block"
+                      "\x01h\x02tb.dut",
+                  count=3, t="line", page="v_line/m", f="x.v", l=11, o="block",
+                  h="tb.dut", s=1),
+        ]
+        data = build_data(pts, "test.dat")
+        row = [r for r in data["duRows"] if r["name"] == "m"][0]
+        hs = sorted(p["h"] for p in row["points"])
+        self.assertEqual(hs, ["dut", "g[0].h[1]", "g[0].h[2]", "g[1].h[1]"])
+        # the tree carries one node per generated level
+        self.assertEqual(len(data["rows"]), 8)  # root, tb, dut, g[0], h[1], h[2], g[1], h[1]
+        html = render_html(data)
+        self.assertIn("g[0].h[1]", html)
+        self.assertNotIn("__BRA__", html)
+        self.assertNotIn("__DOT__", html)
 
 
 class TestMergeParametrized(unittest.TestCase):

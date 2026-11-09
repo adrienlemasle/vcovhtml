@@ -30,6 +30,15 @@ Parametrization variants:
   counts (the union semantics of ``verilator_coverage --merge``), so each
   record is reported once instead of once per parametrization.  Records at
   different instances stay apart, preserving per-instance granularity.
+
+Generate-for iterations:
+  A point inside named begins reports the begin path in its ``h`` field,
+  with the levels joined by ``__DOT__`` and the index of each generate-for
+  iteration appended as ``__BRA__<n>__KET__`` (Verilator escapes the
+  brackets and the dots, which the instance-path prefix and the record
+  name use).  ``unescape_hier`` decodes them, so the per-instance tree
+  carries one node per begin level and every view can distinguish the
+  iterations of a generate-for loop.
 """
 from __future__ import annotations
 
@@ -135,6 +144,24 @@ def splitHier(hier: str) -> list:
 
 def is_collapsed_hier(hier: str) -> bool:
     return ("*" in hier) or ("?" in hier)
+
+
+def unescape_hier(hier: str) -> str:
+    """Undo the markers Verilator writes into a point's ``h`` field.
+
+    The levels of a begin path are joined by ``__DOT__`` and a
+    generate-for iteration appends its index as ``__BRA__<n>__KET__``
+    (never a literal ``.``/``[``, which the instance-path prefix and the
+    record name use).  Decoding restores the readable form:
+    ``g_foo__BRA__3__KET__`` -> ``g_foo[3]``,
+    ``g_a__DOT__g_b`` -> ``g_a.g_b``.  A string without markers is
+    returned unchanged.
+    """
+    if "__" not in hier:
+        return hier
+    return (hier.replace("__DOT__", ".")
+                .replace("__BRA__", "[")
+                .replace("__KET__", "]"))
 
 
 # ---------------------------------------------------------------------------
@@ -259,7 +286,9 @@ def build_code_tree(points) -> tuple:
             ordered.append(p.t)
         if p.h:
             node = root
-            for seg in splitHier(p.h):
+            # Decode the begin markers before splitting, so a nested
+            # generate-for reports one node per level (g_a[0].g_b[1]).
+            for seg in splitHier(unescape_hier(p.h)):
                 node = node.child(seg)
             node.points.append(p)
         else:

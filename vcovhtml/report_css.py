@@ -112,6 +112,10 @@ code.expr, code.net {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 13px; background: #eef1f5; padding: 2px 6px; border-radius: 4px; color: #1f2937;
 }
+.iter {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px; color: var(--muted);
+}
 .expr-detail td.expr-sub, .tog-detail td.tog-sub, .cg-detail td.cg-sub { padding: 6px 10px 14px 30px; background: #fafbfc; }
 .tog-bdet td.tog-bsub, .cg-bdet td.cg-bsub { padding: 4px 10px 10px 34px; background: #f4f6f8; }
 table.pts .num, table.pts th.num { text-align: right; }
