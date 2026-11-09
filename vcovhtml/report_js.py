@@ -863,8 +863,11 @@ JS = r"""
       var d = (exprSort.dir === "asc") ? 1 : -1;
       if (exprSort.key === "score") {
         var sa = a.total ? 100 * a.hit / a.total : 0, sb = b.total ? 100 * b.hit / b.total : 0;
-        if (sa !== sb) return (sb - sa) * d;
-        return (a.line - b.line) * d;
+        if (sa !== sb) return (sa - sb) * d;
+        // same score: line number, then file, then .dat emission order
+        if (a.line !== b.line) return a.line - b.line;
+        if (a.file !== b.file) return a.file < b.file ? -1 : 1;
+        return a.id - b.id;
       }
       if (a.line !== b.line) return (a.line - b.line) * d;
       if (a.file !== b.file) return (a.file < b.file ? -1 : 1) * d;
