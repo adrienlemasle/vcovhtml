@@ -105,7 +105,7 @@ def main(argv=None) -> int:
     src_n = len(data.get("src") or {})
     if src_n:
         print("source lines: %d file(s) embedded" % src_n)
-    out = write_report(points, source, args.output, root)
+    out = write_report(data, args.output)
     _print_summary(data)
     print("wrote %s" % out)
     if args.open:

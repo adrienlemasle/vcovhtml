@@ -5,7 +5,7 @@ import os
 import tempfile
 import unittest
 
-from vcovhtml.covdat import unescape, parse_dat
+from vcovhtml.covdat import Point, unescape, parse_dat
 from vcovhtml.model import (
     splitHier,
     is_collapsed_hier,
@@ -151,6 +151,27 @@ class TestParse(unittest.TestCase):
             self.assertEqual(pt.l, 10)
             self.assertTrue(pt.covered())
             self.assertIn("8'sh3", pt.h)
+
+    def test_internal_unit_last_segment(self):
+        # is_internal_point flags every record whose unit path ends in a
+        # SystemC runtime word (in the unit, or in the instance path) --
+        # the guarantee a name-based parse prefilter would rely on.
+        from vcovhtml.model import _INTERNAL_LAST, is_internal_point
+
+        units = [
+            "dut", "dut.foo", "dut.foo.bar", "m#(8'sh3).x", "top.mod__PB1",
+        ]
+        for w in _INTERNAL_LAST:
+            units += [w, "dut." + w, "a.b." + w]
+        units += ["dut.std.mod", "a.process.b"]  # marker mid-path
+
+        for u in units:
+            pt = Point(t="line", f="a.v", l=1, page="v_line/" + u, h=u)
+            if u.rpartition(".")[2] in _INTERNAL_LAST:
+                self.assertTrue(
+                    is_internal_point(pt),
+                    "model keeps %r" % u,
+                )
 
     def test_types_filter(self):
         with tempfile.TemporaryDirectory() as d:

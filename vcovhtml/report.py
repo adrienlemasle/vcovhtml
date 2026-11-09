@@ -47,22 +47,27 @@ def _instance_label(p: Point) -> str:
 
 
 def _point_json(p: Point) -> dict:
-    # The last dot-segment of the raw h is the whole begin path (its inner
-    # dots are written as __DOT__), so it distinguishes every generate-for
-    # iteration; decode it for display.
-    hseg = unescape_hier(p.h.split(".")[-1]) if p.h else ""
-    return {
-        "t": p.t,
-        "f": p.f,
-        "l": p.l,
-        "o": p.o,
-        "h": hseg,
-        "i": _instance_label(p),
-        "tag": p.Fg or None,
-        "count": p.count,
-        "s": p.s,
-        "covered": p.covered(),
-    }
+    # Memoized: both the tree and the per-unit views serialize every point.
+    v = getattr(p, "_pjson", None)
+    if v is None:
+        # The last dot-segment of the raw h is the whole begin path (its
+        # inner dots are written as __DOT__), so it distinguishes every
+        # generate-for iteration; decode it for display.
+        hseg = unescape_hier(p.h.split(".")[-1]) if p.h else ""
+        v = {
+            "t": p.t,
+            "f": p.f,
+            "l": p.l,
+            "o": p.o,
+            "h": hseg,
+            "i": _instance_label(p),
+            "tag": p.Fg or None,
+            "count": p.count,
+            "s": p.s,
+            "covered": p.covered(),
+        }
+        p._pjson = v
+    return v
 
 
 def _entry(hit: int, total: int) -> dict:
@@ -292,9 +297,9 @@ def render_html(data: dict) -> str:
     )
 
 
-def write_report(points, source: str, out_path: str, root: str = None) -> str:
-    """Build the report from points and write it to ``out_path``."""
-    html = render_html(build_data(points, source, root))
+def write_report(data: dict, out_path: str) -> str:
+    """Render a built report payload and write it to ``out_path``."""
+    html = render_html(data)
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(html)
     return out_path

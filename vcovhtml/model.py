@@ -189,6 +189,9 @@ def iter_sort_key(hier: str):
 # Design-unit identity
 # ---------------------------------------------------------------------------
 
+_BASE_MEMO = {}
+
+
 def module_base(du: str) -> str:
     """Reduce a design unit to its base module name.
 
@@ -198,10 +201,12 @@ def module_base(du: str) -> str:
     ``<base>#(<params>)`` -- collapse under the bare base name.
     """
     if not du:
+        _BASE_MEMO[du] = du
         return du
     n = du.split("#", 1)[0]   # drop parameter spec
     n = n.split(".", 1)[0]    # drop .cg_… (covergroup) / dotted part
     n = n.split("__", 1)[0]   # drop any __variant marker
+    _BASE_MEMO[du] = n
     return n
 
 
@@ -218,14 +223,25 @@ def is_internal_unit(du: str) -> bool:
     return last in _INTERNAL_LAST
 
 
+def _no_internal_marker(text: str) -> bool:
+    """True when no _INTERNAL_LAST word occurs in ``text`` at all, in which
+    case no segment of it can be an internal unit (cheap gate)."""
+    for last in _INTERNAL_LAST:
+        if last in text:
+            return False
+    return True
+
+
 def is_internal_point(p: Point) -> bool:
     """True when a point belongs to an internal runtime unit, by its design
     unit or by any segment of its instance path."""
     if is_internal_unit(p.du_name()):
         return True
-    for seg in splitHier(p.h):
-        if is_internal_unit(seg):
-            return True
+    h = p.h
+    if h and not _no_internal_marker(h):
+        for seg in splitHier(h):
+            if is_internal_unit(seg):
+                return True
     return False
 
 def point_identity(p: Point) -> tuple:

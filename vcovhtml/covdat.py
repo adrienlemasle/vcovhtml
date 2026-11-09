@@ -60,9 +60,9 @@ def _decode_fields(compact: str) -> dict:
     """
     fields = {}
     for part in compact.split("\x01"):
-        if "\x02" not in part:
-            continue
         key, _, val = part.partition("\x02")
+        if not _:
+            continue
         fields[key] = unescape(val)
     return fields
 
@@ -128,10 +128,13 @@ class Point:
         return self.count >= need
 
     def du_name(self) -> str:
-        """The design-unit part of a page: 'v_<type>/<du>' -> '<du>'."""
-        if self.page and "/" in self.page:
-            return self.page.split("/", 1)[1]
-        return self.h
+        """The design-unit part of a page: 'v_<type>/<du>' -> '<du>'.
+        Memoized: ``page`` is set once at parse time."""
+        v = getattr(self, "_du", None)
+        if v is None:
+            v = self.page.split("/", 1)[1] if (self.page and "/" in self.page) else self.h
+            self._du = v
+        return v
 
 
 def parse_dat(path: str, types=None):
