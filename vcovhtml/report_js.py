@@ -33,6 +33,7 @@ JS = r"""
         count: p.count,
         covered: p.covered,
         h: p.h,
+        i: p.i !== undefined ? p.i : "",
         tag: p.tag,
       };
     }
@@ -637,10 +638,61 @@ JS = r"""
     var m = parts[0].match(/\[(\*|\d+)\]/);
     return m ? "[" + m[1] + "]" : "";
   }
+  // Numeric-index ordering for generate iterations: the sequence of
+  // bracket indexes in path order ([0].g[1] -> [0,1]).  A plain level
+  // sorts before a generated one; [*] sorts last.
+  function iterKey(h) {
+    if (!h) return [];
+    var out = [];
+    h.split(".").forEach(function (seg) {
+      var m = seg.match(/^(.*?)[\[]([^[\]]*)\]$/);
+      if (m) out.push([1, m[2] === "*" ? 1e9 : parseInt(m[2], 10)]);
+      else out.push([0, 0]);
+    });
+    return out;
+  }
+  function cmpIter(a, b) {
+    var ka = iterKey(a.h), kb = iterKey(b.h);
+    var n = Math.max(ka.length, kb.length);
+    for (var i = 0; i < n; i++) {
+      var x = ka[i] || [0, 0], y = kb[i] || [0, 0];
+      if (x[0] !== y[0]) return x[0] - y[0];
+      if (x[1] !== y[1]) return x[1] - y[1];
+    }
+    return 0;
+  }
   function srcCell(p) {
     var t = srcLine(p.file, p.line);
     if (t === null) return "<span class='dim'>source unavailable</span>";
     return (t === "") ? "&nbsp;" : hl(t);
+  }
+
+  // line/branch detail: one row per source unit (the line, or the
+  // branch at a line), the generate-for iterations collapsed beneath
+  // it, ordered by numeric index. Line records carry a coverage type
+  // in the comment field (block, case, elsif, else), branch records a
+  // branch kind (if, else); the key and label include it, so each row
+  // shows the type before the badge.
+  function groupPoints(points) {
+    var map = {};
+    points.forEach(function (p) {
+      var key = (p.file || "") + "#" + p.line + "#" + (p.comment || "");
+      (map[key] = map[key] || []).push(p);
+    });
+    var out = [];
+    Object.keys(map).forEach(function (k) {
+      var list = map[k].slice().sort(cmpIter);
+      out.push({
+        id: out.length,
+        file: list[0].file || "",
+        line: list[0].line || 0,
+        label: list[0].comment || "",
+        total: list.length,
+        hit: list.filter(function (p) { return p.covered; }).length,
+        points: list
+      });
+    });
+    return out;
   }
 
   function drawDetail(sec, rows) {
@@ -648,29 +700,90 @@ JS = r"""
     var st = sortState[rows[0].type] || { key: "line", dir: "asc" };
     var body = sec.querySelector(".td-body");
     body.innerHTML = "";
-    var sorted = rows.slice().sort(function (a, b) {
-      var d = (st.dir === "asc") ? 1 : -1;
-      if (st.key === "status") {
-        if (a.covered !== b.covered) return (a.covered ? -1 : 1) * d;
-        return (a.line - b.line) * d;
-      }
-      return (a.line - b.line) * d;
-    });
     sec.querySelectorAll("th.sortable").forEach(function (th) {
       var base = (th.getAttribute("data-sort") === "line") ? "Line" : "Status";
       th.innerHTML = base + (th.getAttribute("data-sort") === st.key ? (st.dir === "asc" ? " \u25b2" : " \u25bc") : "");
     });
-    sorted.forEach(function (p) {
-      var tr = document.createElement("tr");
-      var it = iterOf(p);
+    var lineCell = function (p) {
       var li = srcIdx(p.file);
-      tr.innerHTML = "<td class='count'>" + (li >= 0 ? "<a class='line-link' href='#file/" + li + "/" + p.line + "'>" + p.line + "</a>" : p.line) + (it ? ' <span class="iter">' + esc(it) + "</span>" : "") + "</td>" +
+      return (li >= 0 ? "<a class='line-link' href='#file/" + li + "/" + p.line + "'>" + p.line + "</a>" : p.line);
+    };
+    var flatRow = function (p) {
+      var it = iterOf(p);
+      var tr = document.createElement("tr");
+      tr.innerHTML = "<td class='count'>" + lineCell(p) + (it ? ' <span class="iter">' + esc(it) + "</span>" : "") + "</td>" +
         "<td class='comment'>" + esc(p.comment || "") + "</td>" +
         "<td class='code-line'>" + srcCell(p) + "</td>" +
         "<td class='st " + (p.covered ? "g" : "r") + "'>" + (p.covered ? "covered" : "missed") + "</td>" +
         "<td class='count'>" + p.count + "</td>" +
         "<td class='count'>" + (p.atLeast || 1) + "</td>";
-      body.appendChild(tr);
+      return tr;
+    };
+    if (rows[0].type !== "line" && rows[0].type !== "branch") {
+      var sorted = rows.slice().sort(function (a, b) {
+        var d = (st.dir === "asc") ? 1 : -1;
+        if (st.key === "status") {
+          if (a.covered !== b.covered) return (a.covered ? -1 : 1) * d;
+        }
+        return (a.line - b.line) * d;
+      });
+      sorted.forEach(function (p) { body.appendChild(flatRow(p)); });
+      return;
+    }
+    var groups = groupPoints(rows);
+    var d = (st.dir === "asc") ? 1 : -1;
+    var rank = function (g) { return (g.hit === g.total) ? 2 : (g.hit ? 1 : 0); };
+    groups.sort(function (a, b) {
+      if (st.key === "status") {
+        var r = rank(a) - rank(b);
+        if (r) return r * d;
+      }
+      if (a.line !== b.line) return (a.line - b.line) * d;
+      if (a.file !== b.file) return (a.file < b.file ? -1 : 1) * d;
+      // same line + file: the .dat emission order (ids are assigned in
+      // first-seen order), e.g. if before else
+      return a.id - b.id;
+    });
+    groups.forEach(function (g) {
+      if (g.total === 1) {
+        // a single record: plain flat row, as before
+        body.appendChild(flatRow(g.points[0]));
+        return;
+      }
+      var row = document.createElement("tr");
+      var cls = (g.hit === g.total) ? "g" : (g.hit ? "o" : "r");
+      var txt = (g.hit === g.total) ? "covered" : (g.hit ? "partial" : "missed");
+      row.innerHTML = "<td class='count'>" + lineCell(g.points[0]) + "</td>" +
+        "<td class='name' style='padding-left:8px'><span class='twisty' data-pg='" + g.id + "'>\u25ba</span>" +
+        (g.label ? ' <code class="expr">' + esc(g.label) + "</code>" : "") +
+        ' <span class="collbadge" title="generate-for iterations">' + g.total + "</span></td>" +
+        "<td class='code-line'>" + srcCell(g.points[0]) + "</td>" +
+        "<td class='st " + cls + "'>" + txt + "</td>" +
+        "<td class='count'>" + g.hit + "</td>" +
+        "<td class='count'>" + g.total + "</td>";
+      body.appendChild(row);
+      var det = document.createElement("tr");
+      det.className = "pg-detail";
+      det.style.display = "none";
+      det.setAttribute("data-pgd", g.id);
+      // <tr> cannot be nested: the instances render in a sub-table
+      // inside a spanning cell (same structure as expr-detail).
+      var sub = "<table class='pts sub'><tr class='h'>" +
+        "<th class='num'>Instance</th>" +
+        "<th class='name'>Status</th>" +
+        "<th class='count'>Hits</th>" +
+        "<th class='count'>Goal</th></tr>";
+      for (var pgi = 0; pgi < g.points.length; pgi++) {
+        var p = g.points[pgi];
+        var lab = p.i || p.comment || "";
+        sub += "<tr><td class='name'>" + (lab ? '<span class="iter">' + esc(lab) + "</span>" : "") + "</td>" +
+          '<td class="st ' + (p.covered ? "g" : "r") + '">' + (p.covered ? "covered" : "missed") + "</td>" +
+          '<td class="count">' + p.count + '</td>' +
+          '<td class="count">' + (p.atLeast || 1) + "</td></tr>";
+      }
+      sub += "</table>";
+      det.innerHTML = "<td colspan='6' class='pg-sub'>" + sub + "</td>";
+      body.appendChild(det);
     });
   }
   // ---- expression coverage: group combinations into their parent expression ----
@@ -684,11 +797,16 @@ JS = r"""
     var terms = exprInner(o).split(" && ").map(function (t) { return t.trim(); });
     var ops = []; var vals = [];
     terms.forEach(function (t) {
-      if (t.indexOf("==") >= 0) {
-        var p = t.split("==");
-        ops.push(p[0].trim());
-        vals.push(p[p.length - 1].trim());
-      } else { ops.push(t); vals.push("?"); }
+      var i = t.lastIndexOf("==");
+      if (i < 0) { ops.push(t); vals.push("?"); return; }
+      var v = t.slice(i + 2).trim();
+      var l = t.slice(0, i).trim();
+      if (l.length > 2 && /^\(.*\)$/.test(l)) {
+        // the operand is itself a wrapped comparison (Verilator nests
+        // them: "(a == b)==0"): display the inner comparison
+        l = l.slice(1, -1).trim();
+      }
+      ops.push(l); vals.push(v);
     });
     return { ops: ops, vals: vals, res: res };
   }
@@ -706,13 +824,17 @@ JS = r"""
   function groupExpr(points) {
     var map = {};
     points.forEach(function (p) {
-      var key = (p.file || "") + "#" + p.line + "#" + (p.h || "");
+      // group on the condition (the comment minus its " => result"),
+      // so all generate-for iterations of one expression collapse
+      // under a single row
+      var cond = (p.comment || "").split(" => ")[0];
+      var key = (p.file || "") + "#" + p.line + "#" + cond;
       (map[key] = map[key] || []).push(p);
     });
     var out = [];
     var idx = 0;
     Object.keys(map).forEach(function (k) {
-      var list = map[k];
+      var list = map[k].slice().sort(cmpIter);
       out.push({
         id: idx++,
         file: list[0].file || "",
@@ -745,15 +867,16 @@ JS = r"""
         return (a.line - b.line) * d;
       }
       if (a.line !== b.line) return (a.line - b.line) * d;
-      return a.label.localeCompare(b.label);
+      if (a.file !== b.file) return (a.file < b.file ? -1 : 1) * d;
+      // same line + file: the .dat emission order
+      return a.id - b.id;
     });
     sorted.forEach(function (g) {
       var sc = g.total ? 100 * g.hit / g.total : null;
       var row = document.createElement("tr");
       var eidx = srcIdx(g.file);
-      var eiter = iterOf(g.combos[0]);
       row.innerHTML = "<td class='num'>" + (eidx >= 0 ? "<a class='line-link' href='#file/" + eidx + "/" + g.line + "'>" + g.line + "</a>" : g.line) + "</td>" +
-        "<td class='name' style='padding-left:8px'><span class='twisty' data-eg='" + g.id + "'>\u25ba</span>" + (eiter ? ' <span class="iter">' + esc(eiter) + "</span>" : "") + " <code class='expr'>" +
+        "<td class='name' style='padding-left:8px'><span class='twisty' data-eg='" + g.id + "'>\u25ba</span> <code class='expr'>" +
         esc(g.label) + "</code></td>" +
         "<td class='num'>" + g.total + "</td>" +
         "<td class='num'>" + g.hit + "</td>" +
@@ -764,10 +887,11 @@ JS = r"""
       det.style.display = "none";
       det.setAttribute("data-egd", g.id);
       det.innerHTML = "<td colspan='5' class='expr-sub'><table class='pts sub'><thead><tr>" +
-        "<th>Combination</th><th class='num'>Hits</th><th>Status</th></tr></thead><tbody>" +
+        "<th>Iteration / Combination</th><th class='num'>Hits</th><th>Status</th></tr></thead><tbody>" +
         g.combos.map(function (c) {
+          var it = iterOf(c);
           var hit = c.count > 0;
-          return "<tr><td>" + esc(c.comment || "") + "</td><td class='num'>" + c.count +
+          return "<tr><td>" + (it ? '<span class="iter">' + esc(it) + "</span> " : "") + esc(c.comment || "") + "</td><td class='num'>" + c.count +
             "</td><td class='st " + (hit ? "g" : "r") + "'>" + (hit ? "covered" : "missed") + "</td></tr>";
         }).join("") + "</tbody></table></td>";
       body.appendChild(det);
@@ -1595,11 +1719,20 @@ JS = r"""
     app.appendChild(sec);
     sec.addEventListener("click", function (e) {
       var th = e.target.closest("[data-sort]");
-      if (!th) return;
-      var key = th.getAttribute("data-sort");
-      if (st.key === key) st.dir = (st.dir === "asc") ? "desc" : "asc";
-      else { st.key = key; st.dir = "asc"; }
-      drawDetail(sec, rows);
+      if (th) {
+        var key = th.getAttribute("data-sort");
+        if (st.key === key) st.dir = (st.dir === "asc") ? "desc" : "asc";
+        else { st.key = key; st.dir = "asc"; }
+        drawDetail(sec, rows);
+        return;
+      }
+      var tw = e.target.closest("[data-pg]");
+      if (tw) {
+        var det = sec.querySelector("[data-pgd='" + tw.getAttribute("data-pg") + "']");
+        var open = det.style.display !== "none";
+        det.style.display = open ? "none" : "";
+        tw.textContent = open ? "\u25ba" : "\u25bc";
+      }
     });
     drawDetail(sec, rows);
   }

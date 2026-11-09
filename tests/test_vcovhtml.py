@@ -10,6 +10,7 @@ from vcovhtml.model import (
     splitHier,
     is_collapsed_hier,
     unescape_hier,
+    iter_sort_key,
     build_code_tree,
     code_tallies,
     merge_parametrized_points,
@@ -101,6 +102,29 @@ class TestUnescapeHier(unittest.TestCase):
             unescape_hier(h),
             "g_net_position_local_token_num[0].g_net_position_option_type[1]",
         )
+
+
+class TestIterSortKey(unittest.TestCase):
+    def test_plain(self):
+        self.assertEqual(iter_sort_key("genblk1"), [(0, 0)])
+
+    def test_single_index(self):
+        self.assertEqual(iter_sort_key("g[0]"), [(1, 0)])
+        self.assertEqual(iter_sort_key("g[*]"), [(1, 10 ** 9)])
+
+    def test_numeric_not_lexicographic(self):
+        names = ["g[10]", "g[0]", "g[1]"]
+        self.assertEqual(sorted(names, key=iter_sort_key),
+                         ["g[0]", "g[1]", "g[10]"])
+
+    def test_nested_path_order(self):
+        names = ["a.g[0].h[1]", "a.g[1].h[0]", "a.g[0].h[0]"]
+        self.assertEqual(sorted(names, key=iter_sort_key),
+                         ["a.g[0].h[0]", "a.g[0].h[1]", "a.g[1].h[0]"])
+
+    def test_plain_before_generated(self):
+        self.assertEqual(sorted(["g[0]", "genblk1"], key=iter_sort_key),
+                         ["genblk1", "g[0]"])
 
 
 class TestParse(unittest.TestCase):
@@ -275,6 +299,21 @@ class TestDataAndHtml(unittest.TestCase):
         self.assertEqual(parsed["nPoints"], 2)
         self.assertEqual(len(parsed["rows"]), 3)  # root, a, a.b
 
+    def test_tree_rows_sorted_by_index(self):
+        from vcovhtml.covdat import Point
+        # insertion order mimics the .dat's emission order: [0], [10], [1]
+        pts = [
+            Point(name="\x01t\x02line\x01h\x02a.g__BRA__0__KET__", count=1,
+                  t="line", h="a.g__BRA__0__KET__", s=1),
+            Point(name="\x01t\x02line\x01h\x02a.g__BRA__10__KET__", count=1,
+                  t="line", h="a.g__BRA__10__KET__", s=1),
+            Point(name="\x01t\x02line\x01h\x02a.g__BRA__1__KET__", count=1,
+                  t="line", h="a.g__BRA__1__KET__", s=1),
+        ]
+        data = build_data(pts, "test.dat")
+        self.assertEqual([r["name"] for r in data["rows"]],
+                         ["design", "a", "g[0]", "g[1]", "g[10]"])
+
     def test_du_view_distinguishes_generate_for(self):
         from vcovhtml.covdat import Point
         pts = [
@@ -299,10 +338,17 @@ class TestDataAndHtml(unittest.TestCase):
         row = [r for r in data["duRows"] if r["name"] == "m"][0]
         hs = sorted(p["h"] for p in row["points"])
         self.assertEqual(hs, ["dut", "g[0].h[1]", "g[0].h[2]", "g[1].h[1]"])
+        # the display label keeps the begin path for generated records
+        # and the whole instance path for plain (old-format) records
+        i10 = sorted(p["i"] for p in row["points"] if p["l"] == 10)
+        self.assertEqual(i10, ["g[0].h[1]", "g[0].h[2]", "g[1].h[1]"])
+        i11 = [p["i"] for p in row["points"] if p["l"] == 11]
+        self.assertEqual(i11, ["tb.dut"])
         # the tree carries one node per generated level
         self.assertEqual(len(data["rows"]), 8)  # root, tb, dut, g[0], h[1], h[2], g[1], h[1]
         html = render_html(data)
         self.assertIn("g[0].h[1]", html)
+        self.assertIn("tb.dut", html)
         self.assertNotIn("__BRA__", html)
         self.assertNotIn("__DOT__", html)
 

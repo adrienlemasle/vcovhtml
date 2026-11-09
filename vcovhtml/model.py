@@ -42,6 +42,7 @@ Generate-for iterations:
 """
 from __future__ import annotations
 
+import re
 from collections import OrderedDict
 
 from .covdat import Point, _decode_fields
@@ -162,6 +163,26 @@ def unescape_hier(hier: str) -> str:
     return (hier.replace("__DOT__", ".")
                 .replace("__BRA__", "[")
                 .replace("__KET__", "]"))
+
+
+def iter_sort_key(hier: str):
+    """Sort key ordering generate-for iterations by numeric index.
+
+    Each dot-segment of a decoded ``h`` may carry a trailing ``[n]``
+    (or ``[*]`` for a combined instance).  The key is the sequence of
+    those indexes in path order, so ``g[10]`` sorts after ``g[9]``
+    instead of between ``g[1]`` and ``g[2]``.  A segment without a
+    bracket sorts before a bracketed one at the same level, and
+    ``[*]`` sorts last.
+    """
+    key = []
+    for seg in (hier or "").split("."):
+        m = re.match(r"^(.*?)\[(\*|\d+)\]$", seg)
+        if m:
+            key.append((1, 10 ** 9 if m.group(2) == "*" else int(m.group(2))))
+        else:
+            key.append((0, 0))
+    return key
 
 
 # ---------------------------------------------------------------------------

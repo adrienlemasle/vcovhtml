@@ -17,6 +17,7 @@ from .model import (
     cg_item_tally,
     is_collapsed_hier,
     is_internal_point,
+    iter_sort_key,
     merge_parametrized_points,
     module_base,
     unescape_hier,
@@ -26,6 +27,23 @@ from .report_js import JS
 
 # Display order for code-coverage type columns.
 _CANON = ["line", "branch", "expr", "toggle", "fsm_state", "fsm_arc"]
+
+
+def _instance_label(p: Point) -> str:
+    """Display label that identifies the record's instance.
+
+    New-format dumps encode begin paths with ``__DOT__``/``__BRA__``
+    markers, so the last real dot-segment *is* the whole begin path;
+    old-format dumps carry a plain instance path, where the last
+    segment alone loses the distinguishing prefix, so the whole path
+    is used instead.
+    """
+    if not p.h:
+        return ""
+    last = p.h.split(".")[-1]
+    if "__DOT__" in last or "__BRA__" in last:
+        return unescape_hier(last)
+    return p.h
 
 
 def _point_json(p: Point) -> dict:
@@ -39,6 +57,7 @@ def _point_json(p: Point) -> dict:
         "l": p.l,
         "o": p.o,
         "h": hseg,
+        "i": _instance_label(p),
         "tag": p.Fg or None,
         "count": p.count,
         "s": p.s,
@@ -196,7 +215,8 @@ def build_data(points, source: str, root: str = None) -> dict:
             "covergroups": _cgs_of(node.full),
             "hasChildren": bool(node.children),
         })
-        for c in node.children.values():
+        # index-sorted, not in the .dat's emission order ([0], [10], ...)
+        for c in sorted(node.children.values(), key=lambda n: iter_sort_key(n.name)):
             _walk(c)
 
     _walk(root)
