@@ -821,28 +821,60 @@ JS = r"""
     }
     return c.ops.map(function (o, i) { return c.vals[i] === "0" ? "!" + o : o; }).join(" && ");
   }
-  function groupExpr(points) {
-    var map = {};
+// Condition identity across parametrized iterations: sized or plain
+// literals in the RHS (a per-iteration constant) are replaced by ?,
+// so each parametrized variant shares one identity, while
+// signal-valued RHSes stay distinct.
+function condId(cond) {
+  var out = [];
+  cond.split("&&").forEach(function (t) {
+    var s = t.split(" ").join("").split("(").join("").split(")").join("");
+    var i = -1, op = "";
+    ["==", "!=", "<=", ">=", "<", ">"].forEach(function (o) {
+      var j = s.indexOf(o);
+      if (j >= 0 && (i < 0 || j < i)) { i = j; op = o; }
+    });
+    if (i < 0) { out.push(s); return; }
+    var lhs = s.slice(0, i), rhs = s.slice(i + op.length);
+    var rhs2 = rhs.replace(new RegExp("\\d+'s?[hHbBoOdD][0-9a-fA-FxX_]+", "g"), "?").replace(new RegExp("\\b\\d+\\b", "g"), "?");
+    out.push(lhs + op + rhs2);
+  });
+  return out.join("&&");
+}
+  // Three-level grouping: line -> expression (condition) -> iteration.
+    // Level 2 collapses all generate-for iterations of one expression
+    // (the condition is the comment minus its " => result"); level 3
+    // lists the iterations in numeric index order.
+  // Three-level grouping: line -> iteration -> expression.
+  // The iteration key is the decoded h (the whole begin path; '' when the
+  // record is outside a begin). A leaf is the point's full comment.
+  function groupExprTree(points) {
+    var byLine = {};
     points.forEach(function (p) {
-      // group on file+line+h, the original key: different
-      // expressions on the same line/instance stay in one group, and each
-      // generate-for iteration (a distinct decoded h) forms its own
-      var key = (p.file || "") + "#" + p.line + "#" + (p.h || "");
-      (map[key] = map[key] || []).push(p);
+      var lk = (p.file || "") + "#" + p.line;
+      var l = byLine[lk] ||
+        (byLine[lk] = { file: p.file || "", line: p.line || 0, iters: {}, order: [], total: 0, hit: 0 });
+      var ik = p.h || "";
+      if (l.iters[ik] === undefined) {
+        l.iters[ik] = { total: 0, hit: 0, exprs: [] };
+        l.order.push(ik);
+      }
+      var t = l.iters[ik];
+      t.exprs.push({ comment: p.comment || "", count: p.count, i: p.i || "" });
+      t.total += 1;
+      if (p.count > 0) t.hit += 1;
+      l.total += 1;
+      if (p.count > 0) l.hit += 1;
     });
     var out = [];
-    var idx = 0;
-    Object.keys(map).forEach(function (k) {
-      var list = map[k].slice().sort(cmpIter);
-      out.push({
-        id: idx++,
-        file: list[0].file || "",
-        line: list[0].line || 0,
-        label: exprLabel(list.map(function (p) { return p.comment || ""; })),
-        total: list.length,
-        hit: list.filter(function (p) { return p.count > 0; }).length,
-        combos: list
+    Object.keys(byLine).forEach(function (k) {
+      var l = byLine[k];
+      var row = { id: out.length, file: l.file, line: l.line, total: l.total, hit: l.hit, iters: [] };
+      l.order.slice().sort(function (x, y) { return cmpIter({ h: x }, { h: y }); }).forEach(function (ik) {
+        var t = l.iters[ik];
+        row.iters.push({ id: row.iters.length, key: ik, total: t.total, hit: t.hit, exprs: t.exprs });
       });
+      out.push(row);
     });
     return out;
   }
@@ -858,6 +890,13 @@ JS = r"""
     });
     var body = sec.querySelector("table.pts tbody");
     body.innerHTML = "";
+    function subLeaf(p, key) {
+      return (p.i && p.i !== key) ? '<span class="iter">' + esc(p.i) + "</span> " : "";
+    }
+    function flatLeaf(p, key) {
+      var lab = p.i || key;
+      return lab && lab.indexOf("[") >= 0 ? '<span class="iter">' + esc(lab) + "</span> " : "";
+    }
     var sorted = groups.slice().sort(function (a, b) {
       var d = (exprSort.dir === "asc") ? 1 : -1;
       if (exprSort.key === "score") {
@@ -877,36 +916,78 @@ JS = r"""
       var sc = g.total ? 100 * g.hit / g.total : null;
       var row = document.createElement("tr");
       var eidx = srcIdx(g.file);
-      row.innerHTML = "<td class='num'>" + (eidx >= 0 ? "<a class='line-link' href='#file/" + eidx + "/" + g.line + "'>" + g.line + "</a>" : g.line) + "</td>" +
-        "<td class='name' style='padding-left:8px'><span class='twisty' data-eg='" + g.id + "'>\u25ba</span> <code class='expr'>" +
-        esc(g.label) + "</code></td>" +
+      var lineCell = "<td class='num'>" + (eidx >= 0 ? "<a class='line-link' href='#file/" + eidx + "/" + g.line + "'>" + g.line + "</a>" : g.line) + "</td>";
+      // A single record renders flat
+      if (g.total === 1) {
+        var c = g.iters[0].exprs[0];
+        var hit = c.count > 0;
+        row.innerHTML = lineCell +
+          "<td class='name' style='padding-left:8px'>" + flatLeaf(c, g.iters[0].key) + esc(c.comment) + "</td>" +
+          "<td class='num'>" + g.total + "</td>" +
+          "<td class='num'>" + g.hit + "</td>" +
+          "<td class='pcell'>" + cell(sc) + "</td>";
+        body.appendChild(row);
+        return;
+      }
+      var only = g.iters.length === 1 ? g.iters[0] : null;
+      var subRows;
+      if (only && only.key.indexOf("[") < 0) {
+        // no begin: the expression leaves sit directly under the line
+        subRows = only.exprs.map(function (c) {
+          var hit = c.count > 0;
+          return "<tr><td>" + subLeaf(c, only.key) + esc(c.comment) + "</td><td class='num'>" + c.count +
+            "</td><td class='st " + (hit ? "g" : "r") + "'>" + (hit ? "covered" : "missed") + "</td></tr>";
+        }).join("");
+      } else {
+        subRows = g.iters.map(function (t) {
+          var ts = t.total ? 100 * t.hit / t.total : null;
+          var open = t.exprs.length > 1;
+          return "<tr><td>" + (open ? "<span class='twisty' data-el2='" + g.id + "/" + t.id + "'>\u25ba</span> " : "&nbsp;&nbsp;&nbsp;") +
+            (t.key ? '<span class="iter">' + esc(t.key) + "</span>" : "") + "</td>" +
+            "<td class='num'>" + t.total + "</td>" +
+            "<td class='num'>" + t.hit + "</td>" +
+            "<td class='pcell'>" + cell(ts) + "</td></tr>" +
+            (open ? "<tr class='expr-l2' data-el2d='" + g.id + "/" + t.id + "' style='display:none'>" +
+            "<td colspan='4' class='expr-sub'><table class='pts sub'><thead><tr>" +
+            "<th>Expression</th><th class='num'>Hits</th><th>Status</th></tr></thead><tbody>" +
+            t.exprs.map(function (c) {
+              var hit = c.count > 0;
+              return "<tr><td>" + subLeaf(c, t.key) + esc(c.comment) + "</td><td class='num'>" + c.count +
+                "</td><td class='st " + (hit ? "g" : "r") + "'>" + (hit ? "covered" : "missed") + "</td></tr>";
+            }).join("") + "</tbody></table></td></tr>" : "");
+        }).join("");
+      }
+      var nIt = g.iters.length;
+      var label = (only && only.key.indexOf("[") < 0)
+        ? g.total + (g.total === 1 ? " expression" : " expression(s)")
+        : nIt + (nIt === 1 ? " instance" : " instances");
+      row.innerHTML = lineCell +
+        "<td class='name' style='padding-left:8px'><span class='twisty' data-el1='" + g.id + "'>\u25ba</span> " + label + "</td>" +
         "<td class='num'>" + g.total + "</td>" +
         "<td class='num'>" + g.hit + "</td>" +
         "<td class='pcell'>" + cell(sc) + "</td>";
       body.appendChild(row);
       var det = document.createElement("tr");
-      det.className = "expr-detail";
+      det.className = "expr-l1";
       det.style.display = "none";
-      det.setAttribute("data-egd", g.id);
+      det.setAttribute("data-el1d", g.id);
+      var subHead = (only && only.key.indexOf("[") < 0)
+        ? "<th>Expression</th><th class='num'>Hits</th><th>Status</th>"
+        : "<th>Instance / Expression</th><th class='num'>Expressions</th><th class='num'>Covered</th><th class='num'>Score</th>";
       det.innerHTML = "<td colspan='5' class='expr-sub'><table class='pts sub'><thead><tr>" +
-        "<th>Iteration / Combination</th><th class='num'>Hits</th><th>Status</th></tr></thead><tbody>" +
-        g.combos.map(function (c) {
-          var it = iterOf(c);
-          var hit = c.count > 0;
-          return "<tr><td>" + (it ? '<span class="iter">' + esc(it) + "</span> " : "") + esc(c.comment || "") + "</td><td class='num'>" + c.count +
-            "</td><td class='st " + (hit ? "g" : "r") + "'>" + (hit ? "covered" : "missed") + "</td></tr>";
-        }).join("") + "</tbody></table></td>";
+        subHead + "</tr></thead><tbody>" +
+        subRows + "</tbody></table></td>";
       body.appendChild(det);
     });
   }
   function drawExprGroups(sec, points) {
-    var groups = groupExpr(points);
+    var groups = groupExprTree(points);
     if (!groups.length) {
       sec.innerHTML += "<div class='empty'>No expression points.</div>";
       return;
     }
-    sec.innerHTML += "<p class='hint'>" + groups.length + " expression(s) over " + points.length +
-      " combinations. Click the Line or Score header to sort; click an expression to see which combinations are hit or missed.</p>";
+    sec.innerHTML += "<p class='hint'>" + groups.length + " line(s) over " + points.length +
+      " combinations. Click the Line or Score header to sort; expand a line to see its instances (or expressions, for lines with a single instance) and an instance to see its expressions.</p>";
     var tbl = document.createElement("table");
     tbl.className = "pts";
     tbl.innerHTML = "<thead><tr>" +
@@ -920,17 +1001,22 @@ JS = r"""
     drawExprBody(sec, groups);
     sec.addEventListener("click", function (e) {
       var th = e.target.closest("[data-expsort]");
-      var tw = e.target.closest("[data-eg]");
+      var tw = e.target.closest("[data-el1],[data-el2]");
       if (th) {
         var key = th.getAttribute("data-expsort");
-        if (exprSort.key === key) exprSort.dir = (exprSort.dir === "asc") ? "desc" : "asc";
-        else { exprSort.key = key; exprSort.dir = (key === "score") ? "desc" : "asc"; }
+        if (exprSort.key === key) {
+          exprSort.dir = (exprSort.dir === "asc") ? "desc" : "asc";
+        } else {
+          // first click on a column: worst-first for score, ascending for line
+          exprSort.key = key; exprSort.dir = "asc";
+        }
         drawExprBody(sec, groups);
         return;
       }
       if (tw) {
-        var gi = tw.getAttribute("data-eg");
-        var det = sec.querySelector("[data-egd='" + gi + "']");
+        var lvl = tw.hasAttribute("data-el1") ? "1" : "2";
+        var gi = tw.getAttribute("data-el" + lvl);
+        var det = sec.querySelector("[data-el" + lvl + "d='" + gi + "']");
         var open = det.style.display !== "none";
         det.style.display = open ? "none" : "";
         tw.textContent = open ? "\u25ba" : "\u25bc";

@@ -116,7 +116,7 @@ code.expr, code.net {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 12px; color: var(--muted);
 }
-.expr-detail td.expr-sub, .tog-detail td.tog-sub, .cg-detail td.cg-sub, .pg-detail td.pg-sub { padding: 6px 10px 14px 30px; background: #fafbfc; }
+.expr-detail td.expr-sub, .expr-l1 td.expr-sub, .expr-l2 td.expr-sub, .tog-detail td.tog-sub, .cg-detail td.cg-sub, .pg-detail td.pg-sub { padding: 6px 10px 14px 30px; background: #fafbfc; }
 .tog-bdet td.tog-bsub, .cg-bdet td.cg-bsub { padding: 4px 10px 10px 34px; background: #f4f6f8; }
 table.pts .num, table.pts th.num { text-align: right; }
 .pcell { white-space: nowrap; }
