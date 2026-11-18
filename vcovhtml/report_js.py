@@ -719,7 +719,9 @@ JS = r"""
         "<td class='count'>" + (p.atLeast || 1) + "</td>";
       return tr;
     };
-    if (rows[0].type !== "line" && rows[0].type !== "branch") {
+    // user (cover property) gets the same treatment: one row per source
+    // line + property, all instances merged, iterations expandable
+    if (rows[0].type !== "line" && rows[0].type !== "branch" && rows[0].type !== "user") {
       var sorted = rows.slice().sort(function (a, b) {
         var d = (st.dir === "asc") ? 1 : -1;
         if (st.key === "status") {

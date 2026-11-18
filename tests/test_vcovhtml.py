@@ -398,6 +398,13 @@ class TestDataAndHtml(unittest.TestCase):
             '["line", "branch", "expr", "toggle", "fsm_state", "fsm_arc"]',
             html,
         )
+        # the user detail page takes the line/branch group path: one row
+        # per line + property, instances merged, expandable sub-table
+        self.assertIn(
+            'rows[0].type !== "line" && rows[0].type !== "branch" && '
+            'rows[0].type !== "user"',
+            html,
+        )
 
 
 class TestMergeParametrized(unittest.TestCase):
