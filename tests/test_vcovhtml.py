@@ -488,5 +488,44 @@ class TestSourceLines(unittest.TestCase):
             data = build_data(pts, "c.dat", d)
             self.assertEqual(data["src"], {})
 
+class TestCliSummary(unittest.TestCase):
+    def _run(self, argv):
+        import contextlib
+        import io
+        from vcovhtml import cli
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = cli.main(argv)
+        return rc, buf.getvalue()
+
+    def _dat(self, d):
+        p = os.path.join(d, "c.dat")
+        _write(p, "# SystemC::Coverage-3\n"
+                 "C '\x01t\x02line\x01page\x02v_line/moda\x01f\x02a.v\x01l\x021' 5\n"
+                 "C '\x01t\x02line\x01page\x02v_line/moda\x01f\x02a.v\x01l\x022' 0\n"
+                 "C '\x01t\x02line\x01page\x02v_line/modb\x01f\x02b.v\x01l\x023' 7\n")
+        return p
+
+    def test_per_design_unit(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = self._dat(d)
+            rc, text = self._run([p, "-o", os.path.join(d, "r.html"),
+                                  "--no-source", "--per-design-unit"])
+            self.assertEqual(rc, 0)
+            self.assertIn("Per design unit", text)
+            self.assertIn("1/2 (50.0%)", text)
+            self.assertIn("1/1 (100.0%)", text)
+            self.assertIn("2/3 (66.7%)", text)
+
+    def test_global_default(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = self._dat(d)
+            rc, text = self._run([p, "-o", os.path.join(d, "r.html"),
+                                  "--no-source"])
+            self.assertEqual(rc, 0)
+            self.assertIn("Coverage summary", text)
+            self.assertNotIn("Per design unit", text)
+
+
 if __name__ == "__main__":
     unittest.main()

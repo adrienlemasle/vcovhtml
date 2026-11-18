@@ -10,6 +10,10 @@ directory), the report also shows each point's actual source line; rows whose
 files cannot be read degrade gracefully.  Clicking a line number opens the
 full source file, landed on that line.  ``--no-source`` skips the source
 reading entirely (fastest).
+
+By default the global per-type coverage summary is printed after the
+report is written; ``--per-design-unit`` prints one row per design unit
+instead, each cell showing hits/total and score.
 """
 from __future__ import annotations
 
@@ -67,6 +71,62 @@ def _print_summary(data):
     print("total points: %d" % data["nPoints"])
 
 
+def _print_du_summary(data):
+    """One row per design unit: hits/total (score) per coverage type."""
+    rows = data["duRows"]
+    types = data["codeTypes"]
+    cols = types + ["covergroup"]
+
+    def fmt(hit, total, score):
+        if not total:
+            return "-"
+        sc = ("%.1f%%" % score) if score is not None else "n/a"
+        return "%d/%d (%s)" % (hit, total, sc)
+
+    def code_cells(r):
+        out = []
+        for tp in types:
+            t = r["tally"].get(tp)
+            if not t:
+                out.append("-")
+            else:
+                hit, total = t
+                out.append(fmt(hit, total, 100.0 * hit / total if total else None))
+        return out
+
+    def func_cell(r):
+        f = r.get("functional")
+        if not f:
+            return "-"
+        return fmt(f["hit"], f["total"], f["score"])
+
+    table = []
+    for r in rows:
+        name = r["name"]
+        if len(r.get("variants") or []) > 1:
+            name += " (%d variants)" % len(r["variants"])
+        table.append([name] + code_cells(r) + [func_cell(r)])
+    tot = {tp: [0, 0] for tp in types}
+    for r in rows:
+        for tp in types:
+            t = r["tally"].get(tp)
+            if t:
+                tot[tp][0] += t[0]
+                tot[tp][1] += t[1]
+    sf = data["summaryFunctional"]
+    table.append(
+        ["total"]
+        + [fmt(h, t, 100.0 * h / t if t else None) for h, t in tot.values()]
+        + [fmt(sf["hit"], sf["total"], sf["score"])])
+
+    widths = [max([len(h)] + [len(row[i]) for row in table])
+              for i, h in enumerate(["design unit"] + cols)]
+    print("Per design unit")
+    print("  ".join(h.ljust(w) for h, w in zip(["design unit"] + cols, widths)))
+    for row in table:
+        print("  ".join(c.ljust(w) for c, w in zip(row, widths)))
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         prog="vcovhtml",
@@ -84,6 +144,9 @@ def main(argv=None) -> int:
                          "rows degrade gracefully when a file is missing)")
     ap.add_argument("--no-source", action="store_true",
                     help="do not read source files at all (fastest; no Source column, no file pages)")
+    ap.add_argument("--per-design-unit", action="store_true",
+                    help="print one summary row per design unit (hits/total and "
+                         "score per type) instead of the global summary")
     ap.add_argument("--open", action="store_true",
                     help="open the report in a web browser after writing")
     ap.add_argument("--version", action="version", version="vcovhtml " + __version__)
@@ -106,7 +169,15 @@ def main(argv=None) -> int:
     if src_n:
         print("source lines: %d file(s) embedded" % src_n)
     out = write_report(data, args.output)
-    _print_summary(data)
+    if args.per_design_unit:
+        if data["byDesignUnit"]:
+            _print_du_summary(data)
+        else:
+            print("warning: no design units in this data; "
+                  "showing the global summary", file=sys.stderr)
+            _print_summary(data)
+    else:
+        _print_summary(data)
     print("wrote %s" % out)
     if args.open:
         webbrowser.open("file://" + os.path.abspath(out))
