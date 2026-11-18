@@ -373,6 +373,39 @@ class TestDataAndHtml(unittest.TestCase):
         self.assertNotIn("__BRA__", html)
         self.assertNotIn("__DOT__", html)
 
+    def test_user_type_canonical_ordering(self):
+        from vcovhtml.covdat import Point
+        # 'user' is a Verilator type (cover property / VL_COVER_INSERT);
+        # it sorts with the canonical types, unknown types after them
+        pts = [
+            Point(name="\x01t\x02user\x01f\x02x.v\x01l\x027\x01o\x02prop",
+                  count=1, t="user", f="x.v", l=7, o="prop", s=0),
+            Point(name="\x01t\x02weird\x01f\x02x.v\x01l\x028\x01o\x02odd",
+                  count=0, t="weird", f="x.v", l=8, o="odd", s=0),
+            Point(name="\x01t\x02line\x01f\x02x.v\x01l\x023\x01o\x02stmt",
+                  count=2, t="line", f="x.v", l=3, o="stmt", s=1),
+        ]
+        data = build_data(pts, "test.dat")
+        self.assertEqual(data["codeTypes"], ["line", "user", "weird"])
+        self.assertEqual(
+            data["summaryCode"]["user"],
+            {"hit": 1, "total": 1, "score": 100.0},
+        )
+        # the node-summary "Coverage by type" table is driven by the
+        # data island's codeTypes, not a hard-coded list of six
+        html = render_html(data)
+        self.assertNotIn(
+            '["line", "branch", "expr", "toggle", "fsm_state", "fsm_arc"]',
+            html,
+        )
+        # the user detail page takes the line/branch group path: one row
+        # per line + property, instances merged, expandable sub-table
+        self.assertIn(
+            'rows[0].type !== "line" && rows[0].type !== "branch" && '
+            'rows[0].type !== "user"',
+            html,
+        )
+
 
 class TestMergeParametrized(unittest.TestCase):
     def _pt(self, page, h, count, t="line", f="x.v", l=3, o="", B=""):

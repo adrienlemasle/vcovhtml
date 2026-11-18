@@ -4,7 +4,7 @@
 Navigation is three levels deep, all driven by the URL hash (deep-linkable):
   1. Report        -- per-instance tree and per-design-unit table (switchable),
                        each with a covergroup column alongside line/branch/
-                       expr/toggle/fsm_state/fsm_arc.
+                       expr/toggle/fsm_state/fsm_arc/user.
   2. Node summary  -- click an instance / design-unit name: a per-type summary
                        table; each type name is clickable.
   3. Type detail   -- click a type: its points table, sortable by line number
@@ -391,7 +391,7 @@ JS = r"""
     tbl.innerHTML = "<thead><tr><th>Type</th><th>Points</th><th>Covered</th><th>Score</th></tr></thead><tbody></tbody>";
     var tb = tbl.querySelector("tbody");
     var any = false;
-    ["line", "branch", "expr", "toggle", "fsm_state", "fsm_arc"].forEach(function (tp) {
+    DATA.codeTypes.forEach(function (tp) {
       var pts = (r.points || []).filter(function (p) { return p.type === tp; });
       if (!pts.length) return;
       any = true;
@@ -719,7 +719,9 @@ JS = r"""
         "<td class='count'>" + (p.atLeast || 1) + "</td>";
       return tr;
     };
-    if (rows[0].type !== "line" && rows[0].type !== "branch") {
+    // user (cover property) gets the same treatment: one row per source
+    // line + property, all instances merged, iterations expandable
+    if (rows[0].type !== "line" && rows[0].type !== "branch" && rows[0].type !== "user") {
       var sorted = rows.slice().sort(function (a, b) {
         var d = (st.dir === "asc") ? 1 : -1;
         if (st.key === "status") {

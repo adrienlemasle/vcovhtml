@@ -26,7 +26,7 @@ from .report_css import CSS
 from .report_js import JS
 
 # Display order for code-coverage type columns.
-_CANON = ["line", "branch", "expr", "toggle", "fsm_state", "fsm_arc"]
+_CANON = ["line", "branch", "expr", "toggle", "fsm_state", "fsm_arc", "user"]
 
 
 def _instance_label(p: Point) -> str:
