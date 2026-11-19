@@ -14,6 +14,10 @@ reading entirely (fastest).
 By default the global per-type coverage summary is printed after the
 report is written; ``--per-design-unit`` prints one row per design unit
 instead, each cell showing hits/total and score.
+
+``--no-report`` runs in CLI-only mode: no HTML report is written and the
+data island is never built, so the summary is printed from the parsed
+points directly (the fastest way to get the numbers for a large .dat).
 """
 from __future__ import annotations
 
@@ -25,7 +29,16 @@ import webbrowser
 
 from . import __version__
 from .covdat import parse_dat
-from .report import build_data, write_report
+from .model import (
+    build_covergroups,
+    build_du,
+    cg_groups_tally,
+    covergroups_by_module,
+    is_internal_point,
+    merge_parametrized_points,
+    module_base,
+)
+from .report import _CANON, _entry, build_data, write_report
 
 
 def _inputs(paths):
@@ -127,6 +140,75 @@ def _print_du_summary(data):
         print("  ".join(c.ljust(w) for c, w in zip(row, widths)))
 
 
+def _cli_summary(points):
+    """Summary numbers without the HTML data island (for --no-report).
+
+    Uses the same building blocks as build_data -- parametrization merge,
+    internal-unit filtering, build_du and the covergroup tallies -- so the
+    printed numbers agree with the report, while the island itself (point
+    JSON, source reading, covergroup serialization) is never built.
+    """
+    pts = [p for p in merge_parametrized_points(points)
+           if not is_internal_point(p)]
+
+    ordered = []
+    for p in pts:
+        if p.t != "covergroup" and p.t not in ordered:
+            ordered.append(p.t)
+    code_types = [t for t in _CANON if t in ordered] +                  [t for t in ordered if t not in _CANON]
+
+    tals = {}
+    for p in pts:
+        if p.t == "covergroup":
+            continue
+        h, tot = tals.get(p.t, (0, 0))
+        tals[p.t] = (h + (1 if p.count > 0 else 0), tot + 1)
+    summary_code = {t: _entry(*tals.get(t, (0, 0))) for t in code_types}
+
+    groups = build_covergroups(pts)
+    by_module = covergroups_by_module(groups)
+    module_func = {b: cg_groups_tally(gs) for b, gs in by_module.items()}
+    overall = cg_groups_tally(list(groups.values()))
+
+    du_map, du_ordered = build_du(pts)
+    du_types = [t for t in _CANON if any(k.rsplit("#", 1)[1] == t for k in du_map)] +                [t for t in du_ordered if t not in _CANON
+                and any(k.rsplit("#", 1)[1] == t for k in du_map)]
+    by_base = {}
+    for p in pts:
+        if p.t == "covergroup":
+            continue
+        base = module_base(p.du_name())
+        if not base:
+            continue
+        b = by_base.setdefault(base, [])
+        duval = p.du_name()
+        if duval not in b:
+            b.append(duval)
+    du_rows = []
+    for base in sorted(by_base):
+        variants = by_base[base]
+        tally = {}
+        for t in du_types:
+            hv, tv = du_map.get(base + "#" + t, (0, 0))
+            if tv:
+                tally[t] = [hv, tv]
+        du_rows.append({
+            "name": base,
+            "variants": variants if len(variants) > 1 else [],
+            "tally": tally,
+            "functional": module_func.get(base),
+        })
+
+    return {
+        "codeTypes": code_types,
+        "summaryCode": summary_code,
+        "summaryFunctional": _entry(overall["hit"], overall["total"]),
+        "duRows": du_rows,
+        "byDesignUnit": bool(du_rows),
+        "nPoints": len(pts),
+    }
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         prog="vcovhtml",
@@ -144,6 +226,9 @@ def main(argv=None) -> int:
                          "rows degrade gracefully when a file is missing)")
     ap.add_argument("--no-source", action="store_true",
                     help="do not read source files at all (fastest; no Source column, no file pages)")
+    ap.add_argument("--no-report", action="store_true",
+                    help="CLI-only mode: do not write the HTML report and skip "
+                         "the data island (fastest for large .dat files)")
     ap.add_argument("--per-design-unit", action="store_true",
                     help="print one summary row per design unit (hits/total and "
                          "score per type) instead of the global summary")
@@ -162,13 +247,20 @@ def main(argv=None) -> int:
               file=sys.stderr)
         return 1
 
-    source = " ".join(args.input)
-    root = None if args.no_source else (args.source_root or os.getcwd())
-    data = build_data(points, source, root)
-    src_n = len(data.get("src") or {})
-    if src_n:
-        print("source lines: %d file(s) embedded" % src_n)
-    out = write_report(data, args.output)
+    if args.no_report:
+        if args.open:
+            print("warning: --open ignored: no report is written with "
+                  "--no-report", file=sys.stderr)
+        data = _cli_summary(points)
+    else:
+        source = " ".join(args.input)
+        root = None if args.no_source else (args.source_root or os.getcwd())
+        data = build_data(points, source, root)
+        src_n = len(data.get("src") or {})
+        if src_n:
+            print("source lines: %d file(s) embedded" % src_n)
+        out = write_report(data, args.output)
+
     if args.per_design_unit:
         if data["byDesignUnit"]:
             _print_du_summary(data)
@@ -178,9 +270,11 @@ def main(argv=None) -> int:
             _print_summary(data)
     else:
         _print_summary(data)
-    print("wrote %s" % out)
-    if args.open:
-        webbrowser.open("file://" + os.path.abspath(out))
+
+    if not args.no_report:
+        print("wrote %s" % out)
+        if args.open:
+            webbrowser.open("file://" + os.path.abspath(out))
     return 0
 
 

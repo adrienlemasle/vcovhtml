@@ -526,10 +526,10 @@ class TestCliSummary(unittest.TestCase):
         import contextlib
         import io
         from vcovhtml import cli
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out),                 contextlib.redirect_stderr(io.StringIO()):
             rc = cli.main(argv)
-        return rc, buf.getvalue()
+        return rc, out.getvalue()
 
     def _dat(self, d):
         p = os.path.join(d, "c.dat")
@@ -558,6 +558,38 @@ class TestCliSummary(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertIn("Coverage summary", text)
             self.assertNotIn("Per design unit", text)
+
+    def test_no_report_global(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = self._dat(d)
+            out = os.path.join(d, "r.html")
+            rc, text = self._run([p, "-o", out, "--no-source", "--no-report"])
+            self.assertEqual(rc, 0)
+            self.assertIn("Coverage summary", text)
+            self.assertIn("total points: 3", text)
+            self.assertNotIn("wrote", text)
+            self.assertFalse(os.path.exists(out))
+
+    def test_no_report_per_design_unit(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = self._dat(d)
+            out = os.path.join(d, "r.html")
+            rc, text = self._run([p, "-o", out, "--no-source", "--no-report",
+                                  "--per-design-unit"])
+            self.assertEqual(rc, 0)
+            self.assertIn("Per design unit", text)
+            self.assertIn("1/2 (50.0%)", text)
+            self.assertFalse(os.path.exists(out))
+
+    def test_no_report_matches_report(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = self._dat(d)
+            out = os.path.join(d, "r.html")
+            rc, full = self._run([p, "-o", out, "--no-source"])
+            self.assertEqual(rc, 0)
+            rc2, only = self._run([p, "-o", out, "--no-source", "--no-report"])
+            self.assertEqual(rc2, 0)
+            self.assertEqual(full.split("wrote")[0], only)
 
 
 if __name__ == "__main__":
